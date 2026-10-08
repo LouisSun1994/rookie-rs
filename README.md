@@ -18,6 +18,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 編號 | 主題 | 日期 |
 |---|---|---|
 | [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 | 2026-10-07 |
+| [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 | 2026-10-08 |
 
 ## 階段路線圖
 
