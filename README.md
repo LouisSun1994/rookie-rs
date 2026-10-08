@@ -11,13 +11,13 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
 | 路徑 | 內容 |
 |---|---|
-| `notes/` | 學習筆記，依序編號 `rust-learning-notes-NN.md` |
+| `notes/` | 學習筆記，依序編號 `NN-主題.md` |
 
 ### 筆記索引
 
 | 編號 | 主題 | 日期 |
 |---|---|---|
-| [01](notes/rust-learning-notes-01.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 | 2026-10-07 |
+| [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 | 2026-10-07 |
 
 ## 階段路線圖
 
