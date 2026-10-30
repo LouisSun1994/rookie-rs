@@ -201,6 +201,28 @@ iGPU：  SSD ──DMA──▶ DRAM（統一記憶體）──直接讀（zero-
 - iGPU 沒有「搬進 VRAM」這步：配 GPU 記憶體 = 在 DRAM 劃一塊讓 GPU 也看得到。
 - Intel 的 user-mode driver（compute-runtime）開源、kernel driver 在 Linux 主線裡；NVIDIA 要另外裝閉源套件。結構一模一樣，只是每層換了名字。
 
+> **補充：DMA 是什麼**（整理時加註）
+>
+> DMA = Direct Memory Access。**裝置自己當記憶體匯流排的主動方（bus master），直接對 DRAM 讀寫，不靠 CPU 執行 load / store 來搬。** 沒有 DMA 的做法叫 PIO（programmed I/O）：CPU 一個字一個字從裝置暫存器讀出來再寫進記憶體，搬 1 GB 權重要耗掉 CPU 幾億條指令，而且搬的期間 CPU 什麼都不能做。
+>
+> 一次 DMA 的三個角色（主詞要精確）：
+>
+> | 誰 | 做什麼 | 什麼時候 |
+> |---|---|---|
+> | kernel-mode driver（nvme.ko / nvidia.ko，跑在 app thread 的 syscall 裡） | 準備一張「描述符」：來源、目的的**實體位址**、長度；把目的頁釘住（pinned，不准 swap、不准搬家）；寫進裝置的命令佇列、敲門鈴 | 開頭，一次 |
+> | 裝置裡的 DMA engine（SSD 控制器、GPU 的 copy engine、網卡） | 自己發匯流排交易，把資料一塊一塊寫進（或讀出）DRAM；它是一台獨立的小機器，有自己的狀態 | 中間，CPU 完全不參與 |
+> | 裝置 → 中斷 → driver ISR | 搬完了：寫 completion / fence，發 MSI-X；ISR 看一眼、`wake_up()` | 結尾，一次 |
+>
+> - **為什麼要釘住頁、要實體位址**：DMA engine 不走 CPU 的 MMU，它看不懂虛擬位址，也不會處理 page fault。如果搬到一半 kernel 把那頁 swap 出去或搬到別的實體頁，資料就寫到錯的地方。所以 `O_DIRECT` 的 buffer、`cudaMallocHost` 的 pinned memory 都要先 pin 住；一般 `malloc` 出來的 pageable 記憶體 CUDA 得先複製到自己的 pinned 暫存區才能 DMA（這就是 `cudaMemcpy` 用 pageable host memory 會慢的原因）。
+> - **IOMMU**：現代平台在裝置和 DRAM 之間還有一層 IOMMU，給裝置用的是「IO 虛擬位址」，由 kernel 設映射。目的是隔離（裝置不能亂寫別人的記憶體）和讓 VM passthrough 可行；對上面的模型來說只是「實體位址」多了一層翻譯，角色不變。
+> - **cache 一致性**：DMA 直接寫 DRAM，CPU cache 裡的舊值怎麼辦？x86 硬體會自動 snoop 讓 cache 失效；ARM 平台有些要 driver 明確 flush / invalidate。這是 driver 的事，應用程式看不到。
+> - 這份筆記裡 DMA 出現的每個地方，主動方都是**裝置**，不是 CPU：
+>   - §7 / t11：GPU 算完把結果 DMA 進釘住的 DRAM 頁（主動方 GPU）
+>   - §8 / pread t5：SSD 控制器把 NAND 讀出的資料 DMA 進 buf 對應的實體頁（主動方 SSD 控制器）
+>   - §9 獨顯第二段 / t15：`cudaMemcpyAsync` 不是 CPU 在搬，是 GPU 的 copy engine 在 PCIe 上 DMA，DRAM ↔ VRAM 兩個方向都是它（主動方 GPU copy engine）；所以 t15 才會「再走一次 t7–t14 的等法」——發命令的人是 app thread，搬的人不是
+>   - §9 iGPU：SSD → DRAM 那段仍是 DMA；省掉的是第二段，因為 GPU 直接讀同一塊 DRAM，不需要再搬
+> - 一句話：**DMA 把「搬資料」從 CPU 的工作變成裝置的工作；CPU 剩下的只有「設好描述符」和「被通知」，中間它可以去做別的事或睡覺。** 這就是 §7「資料和通知是兩條路」的硬體基礎——資料路是 DMA，通知路是中斷。
+
 > **補強**：「權重落地兩次」是獨顯的預設路徑，不是硬體限制。GPUDirect Storage（cuFile API + `nvidia-fs.ko`）讓 SSD 控制器 DMA 直接寫進 VRAM，跳過 DRAM 暫存區；需要 driver 與檔案系統配合，多在資料中心卡上用。資料路徑的骨架（DMA 搬、CPU 不搬）不變，只是 DMA 的目的地從 DRAM 換成 VRAM。
 
 ---
