@@ -113,6 +113,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 |---|---|---|
 | [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 | 2026-10-07 |
 | [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 | 2026-10-08 |
+| [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 | 2026-10-30 |
 
 ## 階段路線圖
 
@@ -124,7 +125,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式，已概念性探索到 🦀/🦞 的 smart pointer、async、concurrency）。
+目前位置：🥚 小白（尚未動手寫程式，已概念性探索到 🦀/🦞 的 smart pointer、async、concurrency，以及 🐊 的 FFI / C ABI 與 GPU driver 分層）。
 
 ## 慣例
 
