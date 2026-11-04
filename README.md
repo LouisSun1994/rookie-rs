@@ -59,6 +59,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 繁體中文解釋，技術名詞保留英文（ownership、borrow checker、waker、epoll），第一次出現附簡短中文
 - 程式碼註解繁體中文
 - 區分「我的用詞不對」和「我的概念不對」，前者輕帶過，後者認真修
+- 筆記與範例裡不出現可識別我公司的資訊（公司名稱、產品／專案代號、內部路徑、人名、帳號）；需要舉例時用中性佔位符（`/Users/admin/work`、`some-repo`），背景只說「內部」「團隊」
 
 # /note 產出規範
 我說「/note」或「幫我整理成 note」時，產出一份 Markdown 檔案（檔名 `NN-<slug>.md`，NN 接續上一份、兩位數補零）：
@@ -115,6 +116,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 | 2026-10-08 |
 | [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 | 2026-10-30 |
 | [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 | 2026-11-03 |
+| [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷 | 2026-11-04 |
 
 ## 階段路線圖
 
@@ -126,7 +128,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層與 ELF 記憶體佈局）。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層）。
 
 ## 慣例
 
@@ -134,6 +136,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 每篇筆記開頭標記日期與當時的階段定位
 - 被校正過的誤解集中記在各篇的「誤解修正記錄」節，不刪舊的錯誤理解
 - 標「補強」「補充」的 blockquote 是整理進 repo 時加註、尚未經導師確認的內容；經 /校正 確認後併入正文並移除標記
+- 不出現任何可識別公司的內容：公司名稱、產品／專案代號、內部路徑、同事姓名與帳號。範例路徑與代號一律用中性佔位符（`/Users/admin/work`、`some-repo`），需求背景只用「內部」「團隊」這類泛稱
 
 ## 授權
 
