@@ -80,6 +80,11 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - checklist 的待挖路線每條都要有可跑的切入點與「補哪個子系統 / 哪個模式」；未答的題是腦筋急轉彎，答了才打勾並註記在哪份 note
 - /note 時不把腦筋急轉彎和下一條線寫進 note，改在產出後另列「checklist 更新」：覆蓋表補哪一格、待挖路線哪一條可以打勾、未答的題哪些已經能推
 
+# 經驗（experiences/）
+- repo 的 `experiences/` 放事件驅動的理解：起點是我實際撞到的問題（部署失敗、錯誤訊息、怪現象），往下挖到能解釋它為止；與 `notes/`（挑主題深挖）、`blueprints/`（地圖）分開，獨立編號 `NN-<slug>.md`
+- 我說「/經驗」時產出，結構：一句話版本 → 事件（症狀、錯誤訊息、t0…tN 時間軸、我當時的錯誤模型）→ 各概念章節（核心規則 → 關鍵細節 → 對照表）→ 解法對照 → 陷阱清單（❌ → ✅ → 為什麼）
+- 概念若已在 notes/ 出現，開頭寫「接在哪裡」指回去，不重寫；腦筋急轉彎與下一條線同樣另列「checklist 更新」
+
 # 成長階段（判斷參考，不是進度表）
 🥚 小白 → 🐣 入門（ownership、borrowing、Option/Result、module）→ 🦀 進階（trait、generics、lifetime、closure、iterator、smart pointer）→ 🦞 熟練（concurrency、async/tokio、trait object、生態系）→ 🐊 巨鱷（unsafe、FFI、macro、記憶體佈局、讀 std/tokio 原始碼）
 我目前：語法與記憶體模型在 🐣–🦀 之間，但已經把 tokio runtime 與 OS 排程挖到 kernel 層。不確定我程度時問 1–2 個問題，不要假設。
@@ -96,6 +101,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 「/進度」：總結學了什麼、哪些概念反覆卡住、建議下一條要挖的線；有 checklist 的方向對照 checklist 講
 - 「/挑戰」：比我目前程度高半級的題目
 - 「/藍圖 <方向>」：產出或更新 `blueprints/<方向>.md` 與 `<方向>-checklist.md`，結構比照現有的 `os`
+- 「/經驗」：把這條線整理成 `experiences/NN-<slug>.md`，結構見「經驗」節
 
 # 進度追蹤
 - 記住我反覆卡住的概念（目前已知：把 user/kernel 層的東西混放、幻想有一個中央管理者在派工、把「等待」和「在佇列」混為一談），之後換角度主動複習
@@ -115,6 +121,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 |---|---|
 | `notes/` | 學習筆記，依序編號 `NN-主題.md`——學習的點滴紀錄 |
 | `blueprints/` | 各方向的藍圖與學習方向 checklist：`<方向>.md` 是地圖（家譜、骨架、貫穿模式、資源），`<方向>-checklist.md` 是進度（覆蓋表、待挖路線、未答的題）。未來新的方向各加一組 |
+| `experiences/` | 經驗：從一個實際撞到的問題出發（部署失敗、錯誤訊息、怪現象），往下挖到能解釋它為止，獨立編號 `NN-主題.md`。不是筆記（起點是事件不是主題）、也不是藍圖 |
 
 ### 筆記索引
 
@@ -130,7 +137,13 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
 | 方向 | 藍圖 | checklist | 建立 |
 |---|---|---|---|
-| OS | [os.md](blueprints/os.md)：類 Unix 家譜、kernel 六個子系統、七個貫穿模式、資源 | [os-checklist.md](blueprints/os-checklist.md)：六個子系統覆蓋表、八條待挖路線、未答的題 | 2026-11-05 |
+| OS | [os.md](blueprints/os.md)：類 Unix 家譜、kernel 六個子系統、七個貫穿模式、資源 | [os-checklist.md](blueprints/os-checklist.md)：六個子系統覆蓋表、九條待挖路線、未答的題 | 2026-11-05 |
+
+### 經驗索引
+
+| 編號 | 主題 | 起因 | 接在哪裡 | 日期 |
+|---|---|---|---|---|
+| [01](experiences/01-libc-abi-alpine.md) | libc 住哪一層、API vs ABI vs ISA、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`、依賴的四種與靜態連結消掉哪一種 | Debian 上編的 Rust binary 丟進 Alpine 容器，`sh: not found` | note 04 ELF 段的下半段、note 05 exec 換映像；藍圖 ②、模式 4 / 6 | 2026-11-05 |
 
 ## 階段路線圖
 
@@ -142,7 +155,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照）。OS 這個方向的地圖與進度在 `blueprints/`。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
 
 ## 慣例
 
@@ -150,7 +163,8 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 每篇筆記開頭標記日期與當時的階段定位
 - 被校正過的誤解集中記在各篇的「誤解修正記錄」節，不刪舊的錯誤理解
 - 標「補強」「補充」的 blockquote 是整理進 repo 時加註、尚未經導師確認的內容；經 /校正 確認後併入正文並移除標記
-- `blueprints/` 是地圖不是日誌：藍圖只在模型被校正時改；checklist 在每份 note 入庫後更新——覆蓋表補 note 編號、待挖路線打勾、未答的題有答案就打勾並註記出處
+- `blueprints/` 是地圖不是日誌：藍圖只在模型被校正時改；checklist 在每份 note 或經驗入庫後更新——覆蓋表補編號、待挖路線打勾、未答的題有答案就打勾並註記出處
+- `experiences/` 是事件驅動：每篇從一個實際撞到的問題起頭（症狀、錯誤訊息、時間軸、當時的錯誤模型）再往下挖；概念若已在 `notes/` 有，用「接在哪裡」指回去不重寫；留下的腦筋急轉彎仍記到對應方向的 checklist
 - 不出現任何可識別公司的內容：公司名稱、產品／專案代號、內部路徑、同事姓名與帳號。範例路徑與代號一律用中性佔位符（`/Users/admin/work`、`some-repo`），需求背景只用「內部」「團隊」這類泛稱
 
 ## 授權

@@ -4,7 +4,7 @@
 > 學習的點滴仍記在 `notes/`；每條線挖到哪裡、下一條挖什麼、還有哪些題沒答，記在 [`os-checklist.md`](os-checklist.md)。
 >
 > 建立日期：2026-11-05｜素材：note 05 產出後的追問（2026-11-04 ～ 11-05），從「Windows 上怎麼做」一路挖到 Mach 與類 Unix 家譜；概念本身記在 note 05 §9–§13。
-> 維護原則：模式表的「已在哪裡撞到」欄每挖完一條線補 note 編號；家譜與子系統表只在模型被校正時改。標（入庫時補）的是整理時加的、未經導師確認。
+> 維護原則：模式表的「已在哪裡撞到」欄每挖完一條線補 note / 經驗編號；家譜與子系統表只在模型被校正時改。標（入庫時補）的是整理時加的、未經導師確認。
 
 ---
 
@@ -52,11 +52,11 @@
 | # | 模式 | 一句話 | 已在哪裡撞到 |
 |---|---|---|---|
 | 1 | 物件 + 引用 = capability | fd→fileglob、port name→port right、HANDLE→object；引用 per-process、物件全域有 refcount；檢查在「拿」不在「用」 | note 05 §6 fd / SCM_RIGHTS、§13 Mach port |
-| 2 | 一扇門 | user / kernel 只有 trap 一個入口（syscall、中斷、page fault）；「誰讓它動」追到底是這三種之一 | note 02 中斷；note 05 §12 trap |
+| 2 | 一扇門 | user / kernel 只有 trap 一個入口（syscall、中斷、page fault）；「誰讓它動」追到底是這三種之一 | note 02 中斷；note 05 §12 trap；經驗 01 §4 門的長相由 ISA 定 |
 | 3 | 樹狀繼承 vs 橫向傳遞 | ucred、fd table、cwd、env 沿 process tree 往下複製；橫向只能走 IPC 且 kernel 蓋章 | note 05 §5 label 血緣、§7 audit token、§11 繼承表 |
-| 4 | 介面 vs 實作 | POSIX 規定 `fork()` 長什麼樣，不規定是 syscall 還是 clone 的包裝 | note 05 §11 clone vs fork / spawn |
+| 4 | 介面 vs 實作 | POSIX 規定 `fork()` 長什麼樣，不規定是 syscall 還是 clone 的包裝 | note 05 §11 clone vs fork / spawn；經驗 01 §3 API vs ABI、§9 同一個 POSIX API 兩家 libc |
 | 5 | 機制 vs 政策 | kernel 提供機制（MAC hook、context switch、page 替換），政策另外餵（SBPL、nice、LRU） | note 05 §2–§3 Seatbelt |
-| 6 | 名字空間 | 路徑、pid、port name、mount 都是「名字→物件」的表；Linux namespace = 每 process 一份表 → 容器 | note 05 §10 bubblewrap ENOENT vs Seatbelt EPERM |
+| 6 | 名字空間 | 路徑、pid、port name、mount 都是「名字→物件」的表；Linux namespace = 每 process 一份表 → 容器 | note 05 §10 bubblewrap ENOENT vs Seatbelt EPERM；經驗 01 §7 PT_INTERP 路徑、符號名 → `.so` |
 | 7 | 快取與一致性 | page cache、TLB、dentry cache；「寫入了 / 落盤了」「對映了 / 在 RAM」是不同狀態 | note 02 寫檔 |
 
 反覆卡住的三個點對應：「幻想中央管理者」→ 模式 2；「user/kernel 層混放」→ 模式 4；「等待 vs 在佇列」→ 模式 2。
