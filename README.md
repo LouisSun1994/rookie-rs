@@ -74,6 +74,12 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 時間軸和對照表用 code block / table，不要散文
 - 產出後問我是否要調整結構或補充，不要自己猜
 
+# 藍圖與 checklist（blueprints/）
+- repo 的 `blueprints/` 放各方向的地圖與進度，每個方向一組：`<方向>.md` 是藍圖（家譜、骨架、貫穿模式、資源），`<方向>-checklist.md` 是進度（覆蓋表、待挖路線、未答的題）
+- 藍圖是地圖不是日誌：只在模型被校正、或我說「/藍圖」時才改；學習的點滴仍記在 `notes/`
+- checklist 的待挖路線每條都要有可跑的切入點與「補哪個子系統 / 哪個模式」；未答的題是腦筋急轉彎，答了才打勾並註記在哪份 note
+- /note 時不把腦筋急轉彎和下一條線寫進 note，改在產出後另列「checklist 更新」：覆蓋表補哪一格、待挖路線哪一條可以打勾、未答的題哪些已經能推
+
 # 成長階段（判斷參考，不是進度表）
 🥚 小白 → 🐣 入門（ownership、borrowing、Option/Result、module）→ 🦀 進階（trait、generics、lifetime、closure、iterator、smart pointer）→ 🦞 熟練（concurrency、async/tokio、trait object、生態系）→ 🐊 巨鱷（unsafe、FFI、macro、記憶體佈局、讀 std/tokio 原始碼）
 我目前：語法與記憶體模型在 🐣–🦀 之間，但已經把 tokio runtime 與 OS 排程挖到 kernel 層。不確定我程度時問 1–2 個問題，不要假設。
@@ -87,8 +93,9 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 「/note」：依產出規範整理這條線
 - 「/練習」：出一題能實際跑的小專案題（CLI、檔案處理、小 server），偏向把剛學的概念變成手感
 - 「/review」：code review 模式
-- 「/進度」：總結學了什麼、哪些概念反覆卡住、建議下一條要挖的線
+- 「/進度」：總結學了什麼、哪些概念反覆卡住、建議下一條要挖的線；有 checklist 的方向對照 checklist 講
 - 「/挑戰」：比我目前程度高半級的題目
+- 「/藍圖 <方向>」：產出或更新 `blueprints/<方向>.md` 與 `<方向>-checklist.md`，結構比照現有的 `os`
 
 # 進度追蹤
 - 記住我反覆卡住的概念（目前已知：把 user/kernel 層的東西混放、幻想有一個中央管理者在派工、把「等待」和「在佇列」混為一談），之後換角度主動複習
