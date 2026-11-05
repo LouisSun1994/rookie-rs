@@ -4,6 +4,7 @@
 > 核心收穫不是 Seatbelt 的語法，而是四句話：**sandbox 不是一個模式，是 process credential 上的一個欄位**；它跟著 fork / exec 的血緣走，不跟著 IPC 的請求走；檢查發生在「取得資源」的 syscall，不在「使用資源」的 syscall；kernel 是唯一看得到所有 process、又站在所有 syscall 路徑上的東西。
 >
 > 記錄日期：2026-11-04｜當時定位：🥚 小白（仍未動手寫程式），這條線是 OS / systems 支線，碰到 🐊 的 kernel 資料結構（`proc` / `ucred` / `fileglob`）、MAC framework 與 Mach IPC。Claude Code 這個產品本身的 sandbox 設計另記於 [rookie-llm Case 02](https://github.com/LouisSun1994/rookie-llm/blob/main/cases/02-claude-code-sandbox-seatbelt-design.md)，此處只記 OS 概念。
+> 2026-11-05 續：§9–§13、思維鏈 E–H、陷阱 23–37 來自這份 note 產出後的追問——從「Windows 上怎麼做」挖到多 agent 競爭與 flock、fork / exec 每個欄位的繼承真相、Linux 的 clone、硬體與 kernel 的分工、Mach。是同一條線的延伸、經導師校正，不是入庫加註。追問裡整理出的 OS 藍圖（家譜、六個子系統、七個模式）另放 [`blueprints/os.md`](../blueprints/os.md)。
 > Seatbelt 是 Apple 的 private API，operation / filter 清單來自逆向工程（Levin《*OS Internals》、Blazakis〈The Apple Sandbox〉）與 `/System/Library/Sandbox/Profiles/*.sb`，各版 macOS 有增減。
 > 標「補強」「補充」的 blockquote 是整理進 repo 時加註的延伸，不在原本這條線的對話裡。
 
@@ -28,6 +29,9 @@ kernel Sandbox.kext              policy module：讀 ucred.cr_label 那格，NUL
 kernel VFS                       namei → vnode → [MAC hook] → [DAC: vnode_authorize] → VNOP_*
 kernel proc / ucred / fileglob   資料結構：label 住 ucred；fd 是 proc 的 table，指向全域有 refcount 的 fileglob
 kernel launchd 視角              pid 1 是所有 daemon / agent / GUI app 的 parent；它沒有 label
+kernel Mach                      task / thread / vm_map / port：每個 proc 包一個 task；port right 是 IPC 的 capability（§13）
+═══════ 硬體邊界 ═══════
+硬體   CPU / MMU                  特權等級（EL0 / EL1）、trap 指令、exception vector、page table：只給門和隔間，不知道 pid / fd / label（§12）
 ```
 
 每個概念屬於哪一層：
@@ -43,6 +47,10 @@ kernel launchd 視角              pid 1 是所有 daemon / agent / GUI app 的 
 | zsh、git、sudo、launchctl、osascript | user process，各自帶一張 ucred |
 | cfprefsd、launchservicesd | user daemon，由 launchd spawn，不在你的繼承子樹上 |
 | Edit / Read / Write / MCP 工具 | Claude Code 自己的 process 或獨立 process，**不經 sandbox-exec** |
+| task、thread、vm_map、port right | kernel：Mach 層，BSD 的 proc / fd / signal 架在它上面（§13） |
+| `svc #0x80`、EL0 / EL1、exception vector、page table | 硬體：ISA + 特權模式 + MMU，沒有 API（§12） |
+| `clone()`、namespace、seccomp、bubblewrap | Linux kernel：同一個位置的不同實作（§10–§11） |
+| access token、Job object、AppContainer SID、ACL | Windows NT kernel：identity-based 的對應物（§10） |
 
 ---
 
@@ -367,7 +375,230 @@ open("/Users/admin/.gitconfig")
 
 ---
 
-## 9. 思維鏈
+## 9. Claude sandbox 的兩層與多 agent：access control 不是 concurrency control
+
+**核心規則**：Claude Code 的 sandbox 有兩層，兩層都只回答「能不能」。第一層是 kernel 強制（macOS 是 Seatbelt 的 MAC；Linux / WSL2 是 namespace + seccomp），第二層是 harness 自己的 permission / path 規則。kernel 眼裡沒有「agent」這個單位：每次 Bash 呼叫產生的那棵 process tree 共用一張 label，兩次呼叫、兩個 session、兩個 agent，都只是各自帶 label 的 process。**sandbox 管誰能碰什麼，不管誰先誰後**；要協調兩棵 process tree，得靠站在兩棵樹之上的東西。
+
+**關鍵細節：兩層各管什麼**
+
+```
+                     誰決定                  管什麼                        不管什麼
+─────────────────────────────────────────────────────────────────────────────────────────
+第一層 kernel 強制    profile（harness 產）    Bash 子樹的 open/exec/connect  誰先誰後、同時寫同一檔
+                     由 kernel 執行            （macOS Seatbelt；Linux/WSL2 namespace+seccomp）
+第二層 harness        permission 規則、        要不要呼叫這個 tool；         MCP server 放行後做的任何事
+                     path 規則                Read/Edit/Write 的路徑
+不在任何一層          —                       MCP server process 本身       —
+```
+
+- 第一層的通用說法是「kernel 強制」，不是「MAC」：macOS 是 MAC policy 過濾 syscall，Linux 是 namespace（隔離手法）+ seccomp（syscall 過濾）——位置相同、手法不同
+- MCP server 兩層都不管：harness 只決定「這個 tool call 要不要執行」，放行後 MCP process 想碰什麼都可以；app 層有路徑白名單的只有 Read / Edit / Write（harness 這一側的設計記在 rookie-llm Case 02，此處只記 kernel 看到什麼）
+- 兩個 agent 都被允許寫同一檔，就是兩個 process 對同一 inode `open(O_WRONLY)`，之後的交錯跟沒 sandbox 一樣；bubblewrap bind mount 進去的也是同一個真實目錄。協調要靠 `flock`、git worktree（Claude Code Agent tool 的 `isolation: "worktree"`）、分目錄
+
+**flock：鎖掛在 fileglob，不掛在 process、fd 或 label**
+
+題：兩個 agent 的 sandbox 都允許寫 `/repo`。A `open` 後 `flock(LOCK_EX)` 鎖住 `foo.rs`；B 在 Seatbelt 下 `open` 同一檔並 `flock(LOCK_EX)`。(a) sandbox 擋 B 的哪一步？(b) B 的 flock 是失敗還是等待，由誰決定？(c) A 在 B 等待期間 fork 出 C，持有者是誰？A 退出後 B 會醒嗎？
+
+- (a) 都不擋。Seatbelt 檢查點在 `open`，B 的 label 允許；`flock` 沒有 MAC hook
+- (b) 預設 blocking：B 的 thread 離開 CPU 掛在鎖的 wait list（sleep，不在 run queue），不是失敗；加 `LOCK_NB` 才回 `EWOULDBLOCK`。由 caller 的 flag 決定
+- (c) 持有者從頭到尾是 `fileglob_A`（open file description），不是 process、不是 fd、不是 label。fork 讓 C 多一條指向它的 fd，count 1→2；C 不排隊、fork 在 B 等待前後結果一樣。A 退出 count 2→1，鎖不釋放，B 繼續等；C 關掉最後一個 fd 或 `LOCK_UN`，kernel 在 C 的 thread 上解鎖並把 B 標 runnable，之後 scheduler 才跑 B（時間軸見 §14-E）
+
+| 情境 | 結果 | 為什麼 |
+|---|---|---|
+| A fork 孩子用同一 fd | 孩子也持有；A 退出鎖還在 | 同一 fileglob |
+| A `dup(4)` 得 5，對 5 flock | 不衝突 | 同一 fileglob |
+| A 自己再 `open` 得 6，對 6 flock | A 跟自己打架卡死 | 新 fileglob，owner 不同 |
+| C `flock(4, LOCK_UN)` | A 也失去鎖 | 解鎖單位是 fileglob |
+| 多個等待者 | 全部標 runnable，誰先跑誰贏 | XNU `lf_wakelock` 不保證 FIFO |
+| 第三者從不 flock 直接 write | 寫得進去 | advisory；sandbox 也救不了 |
+
+- 對照 `fcntl(F_SETLK)` / POSIX lock：owner 是 process；該 process 對那檔案**任何**一個 fd close，鎖全消失。兩者都跟 label 無關：sandbox 在 ucred 上，鎖在 vnode 上，kernel 刻意不讓兩個軸互相知道
+
+**git worktree 與 `.lock` 協定：站在所有 process 之上的仲裁者只有檔案系統**
+
+- worktree 分開的只有工作目錄、HEAD、index（各在 `.git/worktrees/<name>/`）；`objects/`、`refs/`、`packed-refs`、`config` 共用。兩個 agent 同時 commit，都在往同一個 `objects/` 寫、都在改 `refs/heads/`
+- 不打架是靠協定：objects 是 content-addressed（temp 寫完 rename，已存在就跳過，天然 idempotent）；ref 更新用 `open(".git/refs/heads/<br>.lock", O_CREAT|O_EXCL)` → 寫 sha → `rename` 原子取代。`O_EXCL` 是整套互斥的原子核心。不同 branch 不同 lock 檔名，零交集；同 branch 第二人 `EEXIST` → `Unable to create '...lock': File exists`，快速失敗不壞資料。共用碰撞點只剩 `packed-refs.lock`、`config.lock`、`gc.pid`
+- sandbox 在這裡的貢獻是零，只會弄壞：不給寫 `.git/` → EPERM；給 create 不給 unlink → rollback 時 `.lock` 留在磁碟，之後每個 git 指令 `File exists`（Cowork 的 `device_bash` 預設不允許刪檔，就會出現這個）
+- git 選檔案系統的 `O_EXCL + rename` 當鎖，是因為需要站在所有 process 之上（跨機器也成立）的仲裁者，而那只有檔案系統。協調兩棵 process tree 的東西，必須站在兩棵樹之上
+
+---
+
+## 10. Windows 與 WSL2 對照：identity-based 沒有「掛在 process 上的 policy」，WSL2 是第二顆 kernel
+
+**核心規則**：Seatbelt 是 policy-based——bytecode 掛在 process 上，kernel 每個 syscall 跑它。Windows NT 是 identity-based——access token 裡的 SID / privilege / integrity level，對物件 security descriptor 的 DACL + mandatory label，由 Security Reference Monitor 在開 handle 時比對。NT 沒有「對這個 process 說某路徑以下不准」的語法，同樣效果要用 token + job + ACL 副作用 + WFP + 攔截層五樣湊。WSL2 不是「Windows 的 Linux 模式」，是 Hyper-V 輕量 VM 裡一顆 Microsoft build 的真 Linux kernel——所以 bubblewrap + seccomp 直接可用。
+
+**關鍵細節：Windows**
+
+現況（2026-11）：官方文件寫「The sandbox runs on macOS, Linux, and WSL2. On native Windows, Claude Code runs commands unsandboxed.」WSL2 走 bubblewrap；native Windows sandbox 是 open feature request。
+
+| macOS | Windows | 差在哪 |
+|---|---|---|
+| `ucred` | access token | 都是 per-process、建 process 時決定、子 process 繼承 |
+| `cr_label`（policy） | 無直接對應；最近的是 integrity level（MIC）、restricting SIDs、AppContainer SID | 都是「改身分」不是「掛程式」 |
+| SBPL profile | 無；路徑規則寫在資料夾 ACL 或由 broker 在 user mode 判 | 最根本的差異 |
+| `sandbox_init()` | `CreateRestrictedToken` → `CreateProcessAsUser` | process 不能換自己的 token，只能給孩子 |
+| fork + exec 繼承 | `CreateProcess` 一步，token / job / handle 繼承都在 `STARTUPINFOEX` attribute list | 沒有 fork，沒有 `pre_exec` 空窗 |
+| 血緣 | Job object | Windows 更強：明確 kernel 物件，kill-on-close、禁脫離 |
+| fd / fileglob | HANDLE / kernel object | 同模型 |
+| `SCM_RIGHTS` | `DuplicateHandle` | broker 直接塞進目標 table |
+| 檢查在 open 不在 read | 一樣：`SeAccessCheck` 在 `NtCreateFile` | handle 就是 capability |
+| XPC daemon + `sandbox_check` | broker + `AccessCheck()` | Chromium 的 broker/target 模型 |
+| `EPERM` vs `EACCES` | 都是 `ERROR_ACCESS_DENIED (5)` | 診斷表失效 |
+| App Sandbox（entitlements） | AppContainer（capability SIDs） | 可對任意 process 套 |
+| Docker / VM 層級 | Windows Sandbox（Hyper-V）、WSL2 | 隔離不是過濾 |
+
+Windows 上達到同樣效果的兩條路：
+
+- **路 A：AppContainer（身分法）**——孩子帶 AppContainer SID，沒有任何 ACL 認得它 → 天然 default-deny；放行某資料夾 = 在那個資料夾的 ACL 加 ACE（寫在磁碟上的持久狀態，process 死了還在，harness 要清）；網路由 WFP 依 SID 擋，連 loopback 都要 `CheckNetIsolation LoopbackExempt`
+- **路 B：broker / target（capability 法）**——孩子 token 弱到什麼都開不了，`CreateFile` 被攔截轉 IPC 給 broker（harness），broker 在 user mode 查路徑政策、自己開、`DuplicateHandle` 塞回去。就是「cfprefsd 開 fd 再遞進來」。要安全得補兩件事：target 不經 broker 真的開不了任何東西；broker 的 integrity 比 target 高
+
+Anthropic 選 WSL2 的理由：macOS 是「一張文字、一個 CLI、kernel 負責一切」；Windows 是 token + job + ACL 副作用 + WFP + 攔截層五樣組起來，政策判定還有一部分回到 user mode。WSL2 是真 Linux kernel，bubblewrap + seccomp 直接可用。代價：跨 VM 檔案系統（9P）慢、路徑空間不同、Windows 原生工具不在裡面。shell 是 `bash.exe -c` / `pwsh -Command` 不影響任何一行——綁的是 process 不是 shell。
+
+**關鍵細節：WSL2**
+
+```
+                WSL1（2016）                                 WSL2（2019 起，預設）
+──────────────────────────────────────────────────────────────────────────────────────
+kernel 數量      1：NT kernel                                2：NT + Linux
+Linux 程式怎麼跑 pico process：lxcore.sys 在 NT 裡翻譯 syscall   真的 Linux process
+相容性          翻不到的 syscall 失敗（namespace、seccomp 多半不行） 100%
+檔案系統        直接 NTFS                                     自己的 ext4 vhdx；Windows 磁碟經 9P 掛到 /mnt/c
+類比            Wine 反方向；跟 Seatbelt 一樣住在 syscall 邊界   VM，同 Docker Desktop 的 LinuxKit VM
+```
+
+WSL1 跟 Seatbelt 同形狀（syscall 入口插一層），目的是翻譯不是過濾；被放棄是因為翻譯層補不完——bubblewrap 要的 `unshare` / `seccomp` / `pivot_root` 都在補不完那堆裡。
+
+```
+Windows user      wsl.exe / wslservice        啟動 VM、接 console
+Windows kernel    Hyper-V + vmbus             切 VM、分 CPU / 記憶體、host↔VM 通道
+═══ VM 邊界 ═══
+Linux kernel      linux-msft-wsl              namespace、cgroup、seccomp 全在
+  └ init          WSL 自己的 init             掛 /mnt/c、設網路、起 distro
+Linux user        Ubuntu rootfs               bash、git、Claude Code、bubblewrap
+```
+
+| 跨 VM 管線 | 怎麼接 | 代價 |
+|---|---|---|
+| `/mnt/c` | 9P 走 vmbus，Linux 端 `drvfs` | 每個 open / stat 一次跨 VM RPC，慢一個數量級 |
+| 網路 | 虛擬網卡 NAT 到 host（新版有 mirrored） | VM 內 localhost ≠ Windows localhost |
+| 跑 `.exe` | binfmt_misc 攔截，interop 請 Windows 那邊 spawn | 那是 Windows process，不在任何 Linux sandbox 裡 |
+
+- bubblewrap 的白名單用 mount namespace 讓路徑**不存在**（`ENOENT`）；Seatbelt 用 label 讓 open **不准**（`EPERM`）。網路同理：沒網卡的 network namespace 只留到 proxy 的路，`curl --noproxy` 得到 `Could not resolve host`
+- interop 逃逸點與 launchctl 同形：寄信請外面的人開程式；解法也同形：sandbox 內看不到 interop 的 socket
+- `/mnt/c` 上的 open：Linux 端 namei → 9P client → 跨 VM → Windows 9P server 用 **Windows token** `CreateFile` → NT SRM 查 NTFS ACL。Linux 這邊的 uid / seccomp 管不到 Windows 側 ACL；bwrap 沒 bind `/mnt/c` 則在 Linux namei 就 ENOENT
+
+來源（Claude Code 現況）：[Claude Code sandboxing docs](https://code.claude.com/docs/en/sandboxing)、[Issue #46740 Native sandbox support for Windows](https://github.com/anthropics/claude-code/issues/46740)
+
+---
+
+## 11. 繼承的真相與原語：fork 複製、exec 清理、spawn 合併、thread 共用
+
+**核心規則**：「fork 會把 fd、label、uid 繼承過去」不是一條規則，是 kernel 在三個 syscall 裡對 `struct proc` 每個欄位各自決定「複製 / 共用 / 重設」；exec 不是繼承是清理；只有 parent → child，而且是 fork 那一瞬間的快照。再往下一層，kernel 真正的原語只有三個動作——**建 process 容器、換映像、建 thread**；fork / execve / posix_spawn / pthread_create 在 macOS 與 Linux 各自是 syscall 還是 libc wrapper 並不相同，POSIX 只規定 user 看到的函數與語意。
+
+**關鍵細節：每個欄位各自決定**
+
+全是 kernel 層；user 層只能事先插旗（`FD_CLOEXEC`）。
+
+```
+fork()           新建 proc（新 pid）+ 一條 thread
+                 共用指標：ucred（uid+label）refcount+1（copy-on-write：任一方要改時 kernel 先配新的一張）
+                 深拷貝一層：fd table 新表、每格指同一 fileglob（CLOEXEC 旗照樣複製，fork 不看它）
+                 COW：地址空間（含 env / argv）
+                 複製值：cwd、umask、rlimit、pgrp、signal handler
+                 跟著走：flock（掛 fileglob）   不跟：fcntl 鎖（owner 是 process）
+
+execve()         不建任何東西。不動：pid、ucred（setuid bit 例外換 uid，label 不動）、cwd、umask、rlimit、pgrp、fd table 本身
+                 動一下：帶 FD_CLOEXEC 的格子 close
+                 重設：地址空間、env / argv（由參數給）、signal handler → default、thread → 一條
+
+posix_spawn()    = fork 的複製/共用 + execve 的重設；中間空窗改由 file_actions / attr 宣告，kernel 代勞
+                 Apple：POSIX_SPAWN_CLOEXEC_DEFAULT = 全部視為 CLOEXEC，只留 file_actions 明說的（白名單式）
+
+pthread_create() 不是新 process。新建一條 thread（stack、暫存器）；其他全部共用（地址空間、ucred、fd table 同一張）
+```
+
+| | fork | execve | posix_spawn | pthread_create |
+|---|---|---|---|---|
+| 新 process？ | 是 | 否 | 是 | 否 |
+| ucred（uid + label） | 共用 | 不動（setuid 換 uid） | 共用 | 共用 |
+| fd table | 新表、指同物件 | 同表，關 CLOEXEC 格 | 新表，照 file_actions | 同表 |
+
+記法：**fork 複製、exec 清理、spawn 合併、thread 共用**。label 每一欄都「在」，是因為它住在 ucred 裡，四個 syscall 沒有一個會動 ucred——Sandbox.kext 不需要寫任何繼承邏輯。
+
+- 「往下」只有 parent → child；不往上、不橫向（橫向要 SCM_RIGHTS）。是 fork 那一瞬間的快照不是活連結：父之後 open 的新 fd 孩子看不到；只有同一 fileglob 的 offset / flock 是活的共用
+- `FD_CLOEXEC` 住在 **fileproc（table 的格子）** 不是 fileglob：`dup()` 出的新格子旗是乾淨的（`dup3` / `F_DUPFD_CLOEXEC` 才帶）。語意：「這個 fd 是我私人的」——fork 出的孩子還跑我的碼所以要有，exec 之後是別人的程式不該看到
+- 誰在用：zsh 內部 fd 全設 CLOEXEC、要給孩子的 `dup2` 到 0/1/2；Rust std 所有 `File::open` / socket 預設 `O_CLOEXEC`，`Command::spawn` 的孩子只拿 0/1/2，要傳 fd 得 `Stdio::from(file)` 或 `pre_exec` 清旗；Windows 每個 HANDLE 有 `HANDLE_FLAG_INHERIT` + `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 白名單，同一模型
+- `git log > out.txt 2>&1` 這一行就是 fork / exec 拆兩步的理由：子 zsh 在空窗裡 `dup2` 把 out.txt 的 fd 搬到 1、2，exec 之後 git 不知道原本那個 fd 存在過；posix_spawn 把這三步變成 `file_actions`（時間軸見 §14-F）
+
+**關鍵細節：原語與 wrapper**
+
+| 呼叫 | macOS | Linux | 層 |
+|---|---|---|---|
+| `fork()` | syscall `fork` | syscall `clone`（不帶共用旗） | kernel |
+| `execve()` | syscall | syscall | kernel |
+| `posix_spawn()` | **真 syscall** | 不是；glibc 用 `clone(CLONE_VFORK)` + `execve` 拼 | macOS kernel / Linux libc |
+| `pthread_create()` | 不是；libpthread → `bsdthread_create` | 不是；glibc → `clone(CLONE_VM\|CLONE_FILES\|CLONE_THREAD…)` | libc，底下 kernel |
+
+- kernel 真正的原語是兩個動作：**建 process 容器**、**換映像**（加上建 thread）。Linux 連 fork 都不是底層，`fork()` = `clone(SIGCHLD)`；**process 和 thread 是同一個 syscall，差別只在旗子**（`CLONE_VM` 共用地址空間、`CLONE_FILES` 共用 fd table、`CLONE_THREAD` 共用 pid）。上面那張「複製 / 共用」表在 Linux 就是 clone 的 flag 清單
+- pid 跟 proc 走、tid 跟 thread 走：fork / spawn 配新 pid + 一條 tid；execve 兩者不變；pthread_create 只配新 tid。Linux 每條 thread 有 tid，process 的 pid 其實是 `tgid`，主 thread tid == pid
+- `pthread_create` 是 wrapper 在 user、thread 在 kernel（kernel 配 tid、kernel stack、排進 scheduler）。真正「user 自己延伸、kernel 看不見」的是 goroutine（G）、tokio task；GMP 的 M 才是 clone 出來的 kernel thread。「pthread 是 user 延伸」若推成「kernel 不知道 pthread」就錯
+- Apple 把 spawn 做成 syscall 的理由：每個 process 是一個 Mach task，fork 要複製 task 的 port 空間與 page table，貴；多 thread process fork 後只有一條 thread 活著，ObjC runtime / Mach port / dispatch queue 狀態不一致（Apple：fork 後不 exec 是 undefined）。syscall 讓 kernel 直接「建空 task → 載映像」，不經過複製父親。Linux 用 `CLONE_VFORK`「先共用、再換掉」達到類似效果
+- 為什麼 Linux 需要 clone 而 XNU 不需要：XNU 底下是 Mach，task / thread 本來就是一等公民；Linux 從零寫、沒有 thread 概念，所以發明「用旗子決定共用多少」的統一模型。差異是血統與 thread 模型，不是開放程度。POSIX 規定 user 看到的函數與語意，四個都在裡面；不規定底下是不是 syscall
+- Apple 真正的生態系控制點在 Mach 層：Mach API（`task_for_pid`、port 操作）被 entitlement / SIP 鎖緊、fork 不 exec 標 undefined 逼大家走 `posix_spawn` 與 XPC、Sandbox.kext 閉源。「kernel 開源但你碰不到的那些門」
+
+---
+
+## 12. 「透過 kernel」＝透過軟體：硬體只給門和隔間
+
+**核心規則**：kernel 是 OS 的核心，是軟體。硬體沒有 API，有 ISA + 特權模式 + 記憶體保護；晶片不知道 pid、fd、label 是什麼——那些是 kernel 放在 RAM 裡的 C struct。硬體只保證 user mode 碰不到它們、想碰只能走 trap，而 trap 進去跑的是 kernel 的碼。
+
+**關鍵細節**
+
+```
+硬體（CPU / MMU）提供                              kernel（OS 的核心，軟體）提供
+──────────────────────────────────────────────────────────────────────────────
+特權等級 user / kernel mode（ARM64 EL0 / EL1）      process、thread、pid、tid
+trap 指令：svc #0x80（ARM64）、syscall（x86）        fd table、fileglob、vnode、ucred、label、bytecode
+exception vector：trap 跳去哪                       syscall table：第 N 號對應哪個 C 函數
+MMU / page table：哪些頁 user mode 碰不到            fork / execve / clone 的實作
+中斷、timer                                         scheduler、wait queue、flock 的 lock list
+```
+
+- 整條 sandbox 線講的東西，全在 trap 之後 kernel 程式碼那一步（時間軸見 §14-G 的 t3）；硬體只負責切模式與跳 vector
+- 硬體只做「隔離 + 一扇門」是刻意最小化，讓 OS 自由設計 process 模型；反過來 kernel 的保證依賴那扇門是唯一入口（Meltdown 漏了一條路，上面所有 label 保證作廢）
+- 比喻：kernel 是政府機關的公務員與制度，硬體是大樓——門禁與一扇申辦窗口。換 OS 進同一棟樓，門禁一樣、制度全換
+
+---
+
+## 13. Mach：XNU 底層的 kernel
+
+**核心規則**：Mach 管 **task、thread、虛擬記憶體、port（IPC）** 四樣；process、fd、檔案、signal、socket 全是 BSD 層架在它上面做的。macOS 的 kernel 是兩個 kernel 疊在一起（hybrid：BSD 與 Mach 同一地址空間，不是真 microkernel）。port 與 fd 同構：right 是 kernel 發的 capability，偽造不了、只能被傳遞——整套 XPC / launchd / entitlement / Seatbelt 的 Mach 規則 / audit token 都靠這一點。
+
+**關鍵細節**
+
+```
+user           程式、libc、libpthread、libxpc
+═══ syscall 邊界（BSD syscall 與 Mach trap 走不同號碼）═══
+BSD 層         proc、pid、ucred、fd table、VFS、socket、signal、pipe、flock、MAC framework   ← POSIX 住這；每個 proc 包一個 Mach task
+Mach 層        task（地址空間 + port 空間）、thread、vm_map（page、COW）、port 與 message、scheduler
+IOKit          驅動框架（C++）
+硬體
+```
+
+| Mach 概念 | 是什麼 | 撞到它的地方 |
+|---|---|---|
+| task | 地址空間 + port 名字空間的容器，沒有執行能力 | fork 貴、posix_spawn 做成 syscall |
+| thread | 執行單位，屬於某 task，Mach 原生 | `pthread_create` → `bsdthread_create`；Linux 要 clone 是因為沒這層 |
+| vm_map | task 的頁表抽象；COW、mmap | fork 的 COW |
+| port | kernel 管的單向訊息佇列；持有者拿的是 right（send / receive），是 capability | `mach-lookup`、XPC、osascript 被擋、launchd 名冊、audit token |
+
+- port 與 fd 同構：port = 信箱；receive right 只有一個 task 持有（信箱主人）；send right 可多人持有、沒有就不知道信箱存在；每個 task 一張「整數 → right」表，整數是你的抽屜編號
+- 拿 send right 的三條路：父 task spawn 時給（bootstrap port、task self port）、別人在訊息裡夾一個給你（同 SCM_RIGHTS）、問 launchd `bootstrap_look_up(name)`——這一步就是 Seatbelt `mach-lookup` 攔的地方（時間軸見 §14-H）
+- Apple 留著 Mach 的原因：microkernel 願景沒完全實現，但 port 這個 capability 式 IPC 成了整套安全架構骨幹——XPC、launchd、entitlement、Seatbelt 的 Mach 規則、audit token 全靠「right 是 kernel 發的、偽造不了、只能被傳遞」。跟 fd capability 同一哲學，推廣到所有 IPC
+
+---
+
+## 14. 思維鏈
 
 ### A. Claude Code 的 Bash 跑 `git log`，到 EPERM
 
@@ -440,9 +671,65 @@ t3  launchd (pid 1, label=NULL)   posix_spawn("some.job")                  ← s
 t4  some.job             cred 複製自 launchd → label=NULL → 自由           ← 若 t1 沒堵，這就是完整的 escape
 ```
 
+### E. 兩個 agent 的 flock：鎖掛在 fileglob，B 等到最後一個 reference 消失
+
+```
+t0  A              open(foo.rs) → fileglob_A（count=1）→ fd 4
+t1  A              flock(4, LOCK_EX)            vnode lock list: [EX, owner=fileglob_A]
+t2  B              open(foo.rs) → fileglob_B → fd 3
+t3  B              flock(3, LOCK_EX)            衝突 → B 的 thread 掛 wait list，離開 CPU
+t4  A              fork() → C                   C[4] → fileglob_A，count=2；C 此刻已「持有」
+t5  A              exit                         count=1 → 不釋放 → B 續 sleep
+t6  C              close(4) / exit              count=0 → 解鎖 → B 標 runnable
+t7  scheduler      挑到 B                       B 重查 lock list → 寫入 owner=fileglob_B → 返回 0
+```
+
+Seatbelt 從頭到尾沒出場：t0 / t2 的 `open` 兩邊 label 都允許，`flock` 沒有 MAC hook。
+
+### F. `git log > out.txt 2>&1`：fork / exec 之間的空窗在做什麼
+
+```
+t0  zsh        open("out.txt") → fd 7
+t1  zsh        fork()                      孩子有 0,1,2,7、同一張 ucred(label)
+t2  子 zsh     dup2(7, 1)                  [1] 指 out.txt 的 fileglob，旗乾淨
+t3  子 zsh     dup2(1, 2)
+t4  子 zsh     close(7)（或靠 CLOEXEC）
+t5  子 zsh     execve("git")               kernel 關掉所有 CLOEXEC 格；0,1,2、label 留下
+t6  git        write(1) → out.txt          git 不知道 7 存在過
+```
+
+t2–t4 就是 fork / exec 拆兩步的理由；posix_spawn 把它變成 `file_actions`。
+
+### G. 一次 `fork()`：硬體只負責 t1 和 t4
+
+```
+t0  git / user (EL0)     libc fork() wrapper：syscall 號碼放 x16，執行 svc #0x80
+t1  CPU（硬體）           看到 svc → 切 EL1、存 pc 進 ELR、跳 exception vector      ← 硬體到此結束
+t2  kernel (EL1)         handler 讀 x16 → 查 syscall table → fork1()
+t3  kernel (EL1)         配 struct proc、pid、ucred refcount+1、複製 fd table …（全是軟體、全在 RAM）
+t4  kernel (EL1)         eret → 硬體切回 EL0
+t5  git / user (EL0)     從 fork() 返回
+```
+
+整條 sandbox 線講的東西全在 t3。
+
+### H. `bootstrap_look_up`：一個 send right 怎麼進到 client 的表
+
+```
+t0  client     bootstrap_look_up(bootstrap_port, "com.apple.cfprefsd.agent")   ← 本身是一封 mach_msg 給 launchd
+t1  kernel     MAC hook：mach-lookup (global-name …) → Seatbelt 查 label → allow / deny（deny = -600 / XPC invalid）
+t2  launchd    查名冊，把 cfprefsd 信箱的 send right 夾在回信
+t3  kernel     把 right 插進 client task 的名字空間，回一個整數
+t4  client     mach_msg(send, port=那個整數, body=「讀 com.apple.dock」)
+t5  kernel     訊息放進 cfprefsd 信箱；附 audit token trailer
+t6  cfprefsd   mach_msg(receive) 醒來；讀 token 取 pid；sandbox_check；代辦；回信
+```
+
+跟 §14-B 的 SCM_RIGHTS 同構：right / fileglob 指標只在 kernel 裡搬，client 從頭到尾只拿到一個整數。
+
 ---
 
-## 10. 陷阱清單
+## 15. 陷阱清單
 
 標【模型】是概念錯、會導致錯誤預測；標【用詞】是說法不精確。
 
@@ -491,3 +778,35 @@ t4  some.job             cred 複製自 launchd → label=NULL → 自由       
 22. 【模型】❌ `command not found`、timeout、exit code 1 也當成 sandbox → ✅ 只有 `Operation not permitted` / `unable to access '/Users/admin/…'` / mach-lookup 類錯誤是 Seatbelt；其他是 shell 環境、tty、timeout → 為什麼：見 §8 診斷表，每個字串對應一個不同的檢查點或根本沒有檢查點。
 
 > **補強**（對應第 22 條）：「只有 EPERM 類字串是 Seatbelt」要再收一層——EPERM 是 Seatbelt 的必要條件不是充分條件，TCC 與 SIP 走同一個 MAC hook、同樣回 EPERM（§8 補強）；分辨靠「關掉 sandbox 重跑是否仍 EPERM」。
+
+以下 23–37 是續篇（§9–§13）那段撞到的。
+
+23. 【模型】❌ app 層讓 MCP 只能操作白名單 → ✅ MCP server 兩層都不管，harness 只決定要不要呼叫這個 tool → 為什麼：MCP 是獨立 process，不經 sandbox-exec，harness 也沒對它的 syscall 做任何事；app 層有路徑白名單的只有 Read / Edit / Write。
+
+24. 【用詞】❌ 第一層通稱 MAC → ✅ 通稱「kernel 強制」 → 為什麼：macOS 是 MAC policy 過濾 syscall，Linux 是 namespace（隔離）+ seccomp（syscall 過濾）——位置相同、手法不同。
+
+25. 【模型】❌ 多 agent 都開 sandbox 就不會互相競爭 → ✅ sandbox 是 access control 不是 concurrency control → 為什麼：兩個都被允許寫同一檔，就是兩個 process 對同一 inode `open(O_WRONLY)`，之後的交錯跟沒 sandbox 一樣；協調要靠站在兩棵樹之上的東西（flock、worktree、分目錄）。
+
+26. 【模型】❌ Windows 把 Seatbelt 換成某個 kernel API 就好 → ✅ Windows 是 identity-based，沒有「掛在 process 上的 policy」原語 → 為什麼：要組 token + job + ACL 副作用 + WFP，或 broker / target；政策判定有一部分回到 user mode。Anthropic 因此選 WSL2。
+
+27. 【模型】❌ WSL2 是 Windows 的 Linux 相容層 → ✅ 那是 WSL1（pico process 在 NT 裡翻譯 syscall）；WSL2 是 Hyper-V VM 跑第二顆真 Linux kernel → 為什麼：翻譯層補不完 `unshare` / `seccomp` / `pivot_root`，而 bubblewrap 全靠它們。
+
+28. 【模型】❌ B 的 flock 會「失敗」，因為 fd 在 B 自己的 table → ✅ 預設 blocking 是等待不是失敗（thread 掛 wait list）；鎖掛 fileglob 不是 fd / process / label → 為什麼：`flock` 沒有 MAC hook，Seatbelt 檢查點在 open；加 `LOCK_NB` 才回 `EWOULDBLOCK`，由 caller 決定。
+
+29. 【模型】❌ A fork 出的 C 要「排隊」（A→B→C 或 A→C→B） → ✅ C 不排隊，fork 完成即共同持有；B 等到 `fileglob_A` 最後一個 reference 消失 → 為什麼：fork 讓 C 多一條指向同一 fileglob 的 fd（count 1→2），A 退出只是 count 2→1，鎖不釋放。
+
+30. 【模型】❌ 不同 branch 的 worktree commit 結構上互不影響 → ✅ `.git/objects`、`refs` 共用；不影響是 `O_EXCL + rename` 協定做到的 → 為什麼：objects content-addressed 天然 idempotent；ref 更新靠 `.lock` 檔的 `O_EXCL` 互斥，不同 branch 不同檔名零交集。
+
+31. 【模型】❌ 「fork 會把 fd、label、uid 繼承過去」是一條規則 → ✅ kernel 對每個欄位各自「複製 / 共用 / 重設」；exec 不是繼承是清理；只有 parent→child、是快照 → 為什麼：ucred 共用指標 refcount+1、fd table 深拷貝一層、地址空間 COW、cwd / umask 複製值；父之後 open 的新 fd 孩子看不到。
+
+32. 【模型】❌ 底層就是 fork 和 execve → ✅ 底層是「建 process 容器 / 換映像 / 建 thread」三個動作；Linux 的底層是 clone → 為什麼：Linux 的 `fork()` = `clone(SIGCHLD)`，process 和 thread 是同一個 syscall、差別只在旗子。
+
+33. 【模型】❌ pthread 是 user 延伸、kernel 不知道 → ✅ wrapper 在 user（libpthread → `bsdthread_create` / `clone`），thread 由 kernel 建與排程 → 為什麼：kernel 配 tid、kernel stack、排進 scheduler；真正 kernel 看不見的是 goroutine / tokio task。
+
+34. 【模型】❌ Linux 的 posix_spawn 是 execve 派生的 syscall → ✅ glibc 用 `clone(CLONE_VFORK)` + `execve` 拼的；macOS 才是真 syscall → 為什麼：Apple 每個 process 是 Mach task，fork 要複製 port 空間與 page table 太貴，所以讓 kernel 直接「建空 task → 載映像」。
+
+35. 【模型】❌ Apple 不開源、只要符合 POSIX → ✅ XNU 開源，閉的是 kext（含 Sandbox.kext）/ framework；fork / execve 是 1970 年代 Unix 原語，clone 才是 Linux 後來發明的 → 為什麼：差異來自 Mach 的 thread 模型（task / thread 本來就是一等公民），不是開放程度。
+
+36. 【模型】❌ XNU 是更早的架構、Linux 根據它 tune 生態系 → ✅ Linux（1991）比 macOS（2001）早、從零寫、零共用碼；「類 Unix」= 共用 POSIX 介面 → 為什麼：macOS 是真 BSD 碼 + 真 Mach 碼，Linux 只參考介面；家譜見 `blueprints/os.md`。
+
+37. 【模型】❌ 「透過 kernel」可能是硬體 API → ✅ kernel 是軟體；硬體只提供特權模式、trap、MMU；pid / fd / label 都是 RAM 裡的 struct → 為什麼：硬體沒有 API 只有 ISA；`svc` 之後跑的是 kernel 的 C 碼，整條 sandbox 線都在那裡。

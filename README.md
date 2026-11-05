@@ -106,7 +106,8 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
 | 路徑 | 內容 |
 |---|---|
-| `notes/` | 學習筆記，依序編號 `NN-主題.md` |
+| `notes/` | 學習筆記，依序編號 `NN-主題.md`——學習的點滴紀錄 |
+| `blueprints/` | 各方向的藍圖與學習方向 checklist：`<方向>.md` 是地圖（家譜、骨架、貫穿模式、資源），`<方向>-checklist.md` 是進度（覆蓋表、待挖路線、未答的題）。未來新的方向各加一組 |
 
 ### 筆記索引
 
@@ -116,7 +117,13 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 | 2026-10-08 |
 | [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 | 2026-10-30 |
 | [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 | 2026-11-03 |
-| [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷 | 2026-11-04 |
+| [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷；續篇：Claude sandbox 兩層與多 agent（flock 掛 fileglob、git `.lock` 的 `O_EXCL`）、Windows token / ACL 與 WSL2 對照、fork / exec / spawn / thread 每個欄位的複製／共用／重設與 Linux `clone`、硬體只給門和隔間、Mach task / port | 2026-11-04 / 2026-11-05 |
+
+### 藍圖索引
+
+| 方向 | 藍圖 | checklist | 建立 |
+|---|---|---|---|
+| OS | [os.md](blueprints/os.md)：類 Unix 家譜、kernel 六個子系統、七個貫穿模式、資源 | [os-checklist.md](blueprints/os-checklist.md)：六個子系統覆蓋表、八條待挖路線、未答的題 | 2026-11-05 |
 
 ## 階段路線圖
 
@@ -128,7 +135,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層）。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照）。OS 這個方向的地圖與進度在 `blueprints/`。
 
 ## 慣例
 
@@ -136,6 +143,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 - 每篇筆記開頭標記日期與當時的階段定位
 - 被校正過的誤解集中記在各篇的「誤解修正記錄」節，不刪舊的錯誤理解
 - 標「補強」「補充」的 blockquote 是整理進 repo 時加註、尚未經導師確認的內容；經 /校正 確認後併入正文並移除標記
+- `blueprints/` 是地圖不是日誌：藍圖只在模型被校正時改；checklist 在每份 note 入庫後更新——覆蓋表補 note 編號、待挖路線打勾、未答的題有答案就打勾並註記出處
 - 不出現任何可識別公司的內容：公司名稱、產品／專案代號、內部路徑、同事姓名與帳號。範例路徑與代號一律用中性佔位符（`/Users/admin/work`、`some-repo`），需求背景只用「內部」「團隊」這類泛稱
 
 ## 授權
