@@ -178,6 +178,47 @@ Match host github.com exec "test -n \"$HTTPS_PROXY\""
 
 - 這段最早用 `ssh -o ProxyCommand=…` 直接在命令列測時，被 Claude Code 的 auto-mode 分類器以「Containment Escape」為由拒絕執行；改寫進 `~/.ssh/config`、由 ssh 自己讀取後，同一條連線沒被攔。這是 note 05 §9 的第二層（harness 的 permission 規則）在動作，不是 kernel；kernel 層從頭到尾只看 syscall。
 
+**一次 `git push` 的完整流程：誰 spawn 誰、哪一步是 HTTP、哪一步是 SSH**
+
+```
+t0  zsh (sandbox)     git push origin main
+t1  git               看 remote URL = git@github.com:…  → 決定用 ssh 當傳輸層
+                      spawn: ssh git@github.com "git-receive-pack '…/repo.git'"
+t2  ssh               讀 ~/.ssh/config → Match host github.com 成立（HTTPS_PROXY 存在）
+                      → 不自己 connect()，改 spawn: python3 connect-proxy.py github.com 22
+                        並把自己的 stdin / stdout 接到這個子程序
+t3  connect-proxy.py  讀 env HTTPS_PROXY → connect(127.0.0.1:<port>)        ← Seatbelt 允許的唯一 TCP 出口
+                      送一行 HTTP：CONNECT github.com:22 + Proxy-Authorization: Basic …
+t4  proxy (本機)       驗帳密、查 allowedDomains → connect(github.com:22) → 回 "200 Connection established"
+                      ─── 從這裡起 proxy 不再解讀任何內容，只搬 bytes ───
+t5  connect-proxy.py  收到 200 → 進入純轉送迴圈（stdin → socket、socket → stdout）
+t6  ssh ◀──────────▶ github sshd      SSH 協定：banner、金鑰交換、建立加密通道
+t7  ssh → ssh-agent   connect(AF_UNIX ~/.ssh/agent.sock)                      ← Seatbelt 的 unix-socket 白名單（§4）
+                      請 agent 簽 server 的 challenge → 拿回簽名 → publickey 認證通過（§3）
+t8  git ◀──────────▶ git-receive-pack   在 SSH 加密通道裡跑 git 的 pack 協定（送 objects、更新 ref）
+t9  結束              git-receive-pack 回報 → ssh 關連線 → 腳本 stdin EOF → shutdown → proxy 關 TCP
+```
+
+- 腳本的全部工作是 t3–t5：用**一行明文 HTTP**向本機 proxy 要一條到 `github.com:22` 的 TCP 管子，之後就只搬 bytes。它不實作 SSH、不實作 git、也沒有任何 HTTPS。
+- `Proxy-Authorization` 是給**中間的 proxy** 看的 header（沒帶會回 `407 Proxy Authentication Required`），與給目的地看的 `Authorization`（沒帶回 `401`）是兩個 header；GitHub 永遠不會看到它，在 proxy 那一站就被拆掉。`Basic` 只是 `user:pass` 的 base64，是編碼不是加密，這一跳到 `127.0.0.1` 不出機器所以能接受。
+- 帳密不是從 OS 的金鑰庫拿的，是 URL 的 userinfo 欄位（RFC 3986 的 `http://user:pass@host:port`），`urlparse` 原生拆得出來。腳本拿得到這個環境變數，是因為 env 跟著 fork / exec 的血緣一路下來：Claude Code 起 proxy、產隨機帳密、設進子程序 env → `sandbox-exec` → zsh → git → ssh → python（note 05 §5、§11）。帳密的用途是讓「只有這棵 process tree 的子孫」用得了 proxy；每 session 隨機讓洩漏只影響當下。同 uid 的其他程序用 `ps -E` 仍看得到，所以它是 session 級的臨時憑證，不是 secret。
+- 三層協定各自獨立，不要混：
+
+```
+最外層  腳本 ↔ proxy              HTTP（只有 t3 那一行 CONNECT，明文，對 localhost）
+中間層  ssh ↔ github sshd         SSH（加密由 ssh 做；proxy 與腳本都看不懂內容）
+最內層  git ↔ git-receive-pack    git pack 協定（跑在 SSH 的一個 channel 裡）
+```
+
+- 對照「它只是透過 HTTPS 出去」這個第一印象：
+
+| 說法 | 判定 | 修正 |
+|---|---|---|
+| sandbox 內 git 相關指令都走 ssh | 一半對 | 走 ssh 是因為 remote 寫 `git@…`；remote 寫 `https://` 的 repo，git 內建的 HTTP 傳輸層自己認 `HTTPS_PROXY`，不需要這支腳本 |
+| 所以才建了這段 proxy | 用詞 | proxy 本來就在（Claude Code 起的）；建的是讓 ssh **走它**的 ProxyCommand |
+| 本質是建好 TCP 通道到 22 port | 對 | t3–t5，就是這支腳本的全部 |
+| 然後根據指令做不同 HTTPS 應用 | 不對 | 通道裡是 SSH（t6–t8）；push / fetch 是 SSH 連線上的遠端指令 `git-receive-pack` / `git-upload-pack`，不是 HTTP 請求。整條鏈裡沒有 HTTPS，它只是這個 proxy 平常載的東西 |
+
 ## 7. 事件解剖：三關各死在哪、各怎麼過
 
 | 步 | 症狀 | 哪一關 | 哪一層擋的 | 怎麼過 |
@@ -222,3 +263,5 @@ Match host github.com exec "test -n \"$HTTPS_PROXY\""
 11. ❌【模型】為 SSH 開 proxy 隧道是多此一舉，應該直接走 public → ✅ sandbox 內沒有 public 這條路；要直連等於關掉網路 sandbox → 為什麼：白名單是 proxy 執行的，kernel 層只有「到 proxy」一條 `allow`。
 12. ❌【模型】被攔下的那次 `ssh -o ProxyCommand=…` 是 kernel 擋的 → ✅ 是 harness 的 auto-mode 分類器，在指令執行前就拒絕；kernel 層沒看到那次 connect → 為什麼：note 05 §9 的兩層，第二層決定「要不要跑這個 tool call」，第一層才是 syscall 過濾。
 13. ❌【用詞】「ssh-agent 讓 sandbox 讀不到 pem」 → ✅ sandbox 本來就讀不到 pem（`file-read*` deny）；agent 是讓「讀不到 pem 的程式」仍能完成認證 → 為什麼：agent 不是擋讀取的機制，是把「需要 key」改成「需要簽名」的代理。
+14. ❌【模型】ProxyCommand 腳本「建好 TCP 通道後，根據指令做不同 HTTPS 應用」 → ✅ 通道建好後跑的是 SSH，git 再跑在 SSH 裡；整條鏈沒有 HTTPS，腳本只在 t3 發過一行明文 HTTP `CONNECT` → 為什麼：`CONNECT` 的設計就是「要一條 TCP、之後別管內容」，載什麼協定由兩端決定；「HTTPS」只是這個 proxy 平常載的東西，不是這次載的東西。
+15. ❌【模型】`Proxy-Authorization` 的帳密是「從 OS 拿到的 token」 → ✅ 是 `HTTPS_PROXY` 這個 URL 的 userinfo 欄位，由環境變數沿 fork / exec 血緣繼承到腳本；`Basic` 是 base64 編碼不是加密 → 為什麼：Claude Code 每 session 起 proxy 時產隨機帳密、塞進子程序的 env，讓只有這棵 process tree 用得了 proxy；同 uid 其他程序 `ps -E` 仍看得到，所以它是 session 級臨時憑證，不是 secret。
