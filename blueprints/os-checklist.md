@@ -13,8 +13,8 @@
 | ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
 | ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
 | ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
-| ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
-| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6） | Linux 四根柱子（namespace / cgroup / seccomp / LSM）→ 容器；隔離三層級 |
+| ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4）；跨 VM 管線：9P over hvsocket、AF_VSOCK ↔ AF_HYPERV、binfmt_misc 把 `.exe` 交給 interop（06 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
+| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
 | ⑥ 裝置 | driver 兩半、ioctl、DMA、中斷（02 / 03） | block layer 與 page cache 的接點 |
 
 ## 2. 待挖路線（每條一份 note）
@@ -39,7 +39,8 @@
 - [ ] **6. Linux 容器四根柱子，對照 Seatbelt**
   - 切入點：`unshare -m -p -f`、`bwrap`、`grep Seccomp /proc/self/status`
   - 補哪裡：⑤ + 模式 5、6；接 Claude Code Linux sandbox
-- [ ] **7. 隔離三層級：sandbox / container / VM**
+  - 已有：namespace 按子系統各一張表、cgroup 是限制不是視圖（note 06 §10）；仍缺 seccomp / LSM 與 `unshare` 動手
+- [x] **7. 隔離三層級：sandbox / container / VM** → note 06 §5–§9（模型已建；切入點的 `uname -r` 實測未做）
   - 切入點：同一個 `uname -r` 在 macOS Docker、WSL2、原生各看到誰的 kernel
   - 補哪裡：⑤ + 模式 6；收 WSL2 支線
 - [ ] **8. 網路 stack：socket → TCP → IP → NIC → 中斷 → epoll**
@@ -57,7 +58,7 @@
 
 - [ ] Windows：integrity label 與 DACL 都回 `ERROR_ACCESS_DENIED`，不真的開檔怎麼分辨哪道擋的？（提示：`AccessCheck()`）
 - [ ] 路 A（ACL）與路 B（broker）各自撞到 Claude Code「每次呼叫獨立產一張、可單次關閉」的設計什麼？哪個更接近「process 死 policy 就消失」？
-- [ ] WSL2 裡 `sudo` 讀 `/mnt/c/Windows/System32/config/SAM`：Linux root 跳過 DAC，會成功嗎？死在哪一行、用誰的身分？
+- [ ] WSL2 裡 `sudo` 讀 `/mnt/c/Windows/System32/config/SAM`：Linux root 跳過 DAC，會成功嗎？死在哪一行、用誰的身分？→ 補強答案在 note 06 §12 Q12（整理者推，待 /校正）
 
 **Linux sandbox 對照**
 
@@ -84,6 +85,12 @@
 - [ ] `allowUnixSockets` 的 glob 不生效是 harness 翻成 `literal` 還是 Seatbelt 的 `regex` filter 對 unix-socket 不適用？（經驗 02 §4 推論，待查 harness 產出的 SBPL）
 - [ ] 一條 HTTP `CONNECT` 建好後 proxy 變成純 TCP 管子：proxy 還能看到什麼？`allowedDomains` 對 CONNECT 的 host 檢查發生在哪一刻，隧道內的 SSH 握手它看得到嗎？
 - [ ] ssh-agent 的 socket 權限 `srw-------` 是 DAC；同 uid 的任何 process 都連得上。Seatbelt 之外，macOS 有什麼機制能限制「哪個 process 可以請 agent 簽名」？（提示：agent 看得到 client 的 pid 嗎、`LOCAL_PEERCRED`）
+
+**WSL2 / hypervisor**（note 06 留下）
+
+- [ ] distro 停止與 VM 關機各由誰數、timer 各幾秒？對話推的是 VM 裡的 `/init` 數、distro 層 8 秒；`.wslconfig` 另有 `[wsl2] vmIdleTimeout`（預設 60000 ms）。WSL 開源後 `microsoft/WSL` 的 init 與 wslservice 都讀得到，直接查（note 06 §11 補強）
+- [ ] `/mnt/c` 上 open 被 Windows 側拒絕時，drvfs 回給 Linux 的 errno 是 EACCES 還是 EPERM？`ERROR_ACCESS_DENIED` 與 sharing violation 各對應到哪個？（note 06 §12 Q12）
+- [ ] bwrap 擋 interop 靠的是 mount ns 看不到 `/run/WSL/*_interop`、清掉 `WSL_INTEROP`，還是兩個都做？兩個都不做時 `.exe` 真的照跑嗎、binfmt_misc 把它交給誰？（note 06 §3 補強，可在 WSL2 機器上實測）
 
 **libc / ABI / 載入器**（經驗 01 留下；經驗 01 §11 有入庫時推的答案，待 /校正）
 

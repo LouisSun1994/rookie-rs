@@ -133,6 +133,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 | 2026-10-30 |
 | [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 | 2026-11-03 |
 | [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷；續篇：Claude sandbox 兩層與多 agent（flock 掛 fileglob、git `.lock` 的 `O_EXCL`）、Windows token / ACL 與 WSL2 對照、fork / exec / spawn / thread 每個欄位的複製／共用／重設與 Linux `clone`、硬體只給門和隔間、Mach task / port | 2026-11-04 / 2026-11-05 |
+| [06](notes/06-wsl2-hypervisor-isolation-levels.md) | WSL2 是一台 utility VM + 若干容器（所有 distro 共用一顆 kernel，distro = namespace + vhdx）、`wsl.exe` 到 prompt 與 interop 逃逸點的時間軸、三條跨 VM 管線（9P / hvsocket）、VM / container / sandbox 三層隔離線畫在哪、hypervisor 不模擬（VT-x / EPT / VM exit 是一扇門再往下一層）、Hyper-V 的 root / child partition 與雲上 VM 同構、Windows 上四種執行情境、namespace 按子系統各一張表、VM 生命週期由 process 數決定 | 2026-11-09 |
 
 ### 藍圖索引
 
@@ -157,7 +158,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器，再從一次 sandbox 內 `git push` 不通挖到 ssh-agent、unix socket 的路徑解析與 proxy 單一出口）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照，再從 WSL2 往下挖到 hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 與 VM / container / sandbox 三層隔離的對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器，再從一次 sandbox 內 `git push` 不通挖到 ssh-agent、unix socket 的路徑解析與 proxy 單一出口）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
 
 ## 慣例
 

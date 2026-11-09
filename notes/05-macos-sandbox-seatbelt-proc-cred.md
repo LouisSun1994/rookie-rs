@@ -5,6 +5,7 @@
 >
 > 記錄日期：2026-11-04｜當時定位：🥚 小白（仍未動手寫程式），這條線是 OS / systems 支線，碰到 🐊 的 kernel 資料結構（`proc` / `ucred` / `fileglob`）、MAC framework 與 Mach IPC。Claude Code 這個產品本身的 sandbox 設計另記於 [rookie-llm Case 02](https://github.com/LouisSun1994/rookie-llm/blob/main/cases/02-claude-code-sandbox-seatbelt-design.md)，此處只記 OS 概念。
 > 2026-11-05 續：§9–§13、思維鏈 E–H、陷阱 23–37 來自這份 note 產出後的追問——從「Windows 上怎麼做」挖到多 agent 競爭與 flock、fork / exec 每個欄位的繼承真相、Linux 的 clone、硬體與 kernel 的分工、Mach。是同一條線的延伸、經導師校正，不是入庫加註。追問裡整理出的 OS 藍圖（家譜、六個子系統、七個模式）另放 [`blueprints/os.md`](../blueprints/os.md)。
+> 2026-11-09 續：§10 的 WSL2 圖依 [note 06](06-wsl2-hypervisor-isolation-levels.md) 修正（所有 distro 共用一台 VM 與一顆 kernel，pid 1 是 WSL 的 `/init`）；WSL2 那台 VM 本身——utility VM 的開機時間軸、hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 同構、VM / container / sandbox 三層對照——另記 note 06，本篇 §10 只留 Seatbelt 對照需要的部分。
 > Seatbelt 是 Apple 的 private API，operation / filter 清單來自逆向工程（Levin《*OS Internals》、Blazakis〈The Apple Sandbox〉）與 `/System/Library/Sandbox/Profiles/*.sb`，各版 macOS 有增減。
 > 標「補強」「補充」的 blockquote 是整理進 repo 時加註的延伸，不在原本這條線的對話裡。
 
@@ -469,11 +470,11 @@ Linux 程式怎麼跑 pico process：lxcore.sys 在 NT 裡翻譯 syscall   真�
 WSL1 跟 Seatbelt 同形狀（syscall 入口插一層），目的是翻譯不是過濾；被放棄是因為翻譯層補不完——bubblewrap 要的 `unshare` / `seccomp` / `pivot_root` 都在補不完那堆裡。
 
 ```
-Windows user      wsl.exe / wslservice        啟動 VM、接 console
-Windows kernel    Hyper-V + vmbus             切 VM、分 CPU / 記憶體、host↔VM 通道
-═══ VM 邊界 ═══
+Windows user      wsl.exe / wslservice        啟動 VM、接 console、跑 9P server、處理 interop
+Windows kernel    Hyper-V + HCS + VMBus       切出 utility VM、分 CPU / 記憶體、host↔VM 通道
+═══ VM 邊界 ═══（所有 distro 共用這一台 VM、這一顆 kernel）
 Linux kernel      linux-msft-wsl              namespace、cgroup、seccomp 全在
-  └ init          WSL 自己的 init             掛 /mnt/c、設網路、起 distro
+  └ /init (pid 1) WSL 自己的 init             掛 /mnt/c、設網路；每個 distro = 一組 namespace + 自己的 vhdx
 Linux user        Ubuntu rootfs               bash、git、Claude Code、bubblewrap
 ```
 
@@ -486,6 +487,8 @@ Linux user        Ubuntu rootfs               bash、git、Claude Code、bubblew
 - bubblewrap 的白名單用 mount namespace 讓路徑**不存在**（`ENOENT`）；Seatbelt 用 label 讓 open **不准**（`EPERM`）。網路同理：沒網卡的 network namespace 只留到 proxy 的路，`curl --noproxy` 得到 `Could not resolve host`
 - interop 逃逸點與 launchctl 同形：寄信請外面的人開程式；解法也同形：sandbox 內看不到 interop 的 socket
 - `/mnt/c` 上的 open：Linux 端 namei → 9P client → 跨 VM → Windows 9P server 用 **Windows token** `CreateFile` → NT SRM 查 NTFS ACL。Linux 這邊的 uid / seccomp 管不到 Windows 側 ACL；bwrap 沒 bind `/mnt/c` 則在 Linux namei 就 ENOENT
+
+- WSL2 這台 VM 本身是什麼——utility VM 的開機時間軸、interop 逃逸點的細節、hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 同構、VM / container / sandbox 三層對照、namespace 按子系統各一張表、VM 生命週期——另挖在 [note 06](06-wsl2-hypervisor-isolation-levels.md)；本節只留 Seatbelt 對照需要的部分
 
 來源（Claude Code 現況）：[Claude Code sandboxing docs](https://code.claude.com/docs/en/sandboxing)、[Issue #46740 Native sandbox support for Windows](https://github.com/anthropics/claude-code/issues/46740)
 

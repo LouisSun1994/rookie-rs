@@ -30,7 +30,7 @@
 - macOS = 真的 BSD 程式碼 + 真的 Mach 程式碼；Linux = 從零重寫、長得像。兩者沒有共用任何一行。Linux 比 macOS 早十年，**不是**根據 XNU 調出來的。
 - 授權決定了誰能拿誰的碼：BSD 授權允許 Apple 拿去閉源改（macOS userland 多來自 FreeBSD）；GPL 不允許。macOS 2019 年預設 shell 從 bash 換 zsh，是因為 bash 4+ 改 GPLv3——Claude Code 的 Bash 工具跑 zsh，根源是授權。
 - Apple 開源的是 Darwin：XNU kernel（`github.com/apple-oss-distributions/xnu`）、libc、launchd、部分 userland。閉源的是 framework、大多數 kext（Sandbox.kext 在內）、GUI。所以「kernel 開源、policy 閉源」。
-- Windows NT 不在這棵樹上：另一個血統（VMS 系），安全模型是 identity-based 不是 policy-based；與 Seatbelt 的逐項對照、WSL2 怎麼把一顆真 Linux kernel 塞進來，見 note 05 §10（入庫時補）。
+- Windows NT 不在這棵樹上：另一個血統（VMS 系），安全模型是 identity-based 不是 policy-based；與 Seatbelt 的逐項對照、WSL2 怎麼把一顆真 Linux kernel 塞進來，見 note 05 §10（入庫時補）；WSL2 那台 VM 本身——utility VM、hypervisor 與 VT-x、VM / container / sandbox 三層——見 note 06。
 
 ## 2. 一個類 Unix kernel 的六個子系統
 
@@ -52,7 +52,7 @@
 | # | 模式 | 一句話 | 已在哪裡撞到 |
 |---|---|---|---|
 | 1 | 物件 + 引用 = capability | fd→fileglob、port name→port right、HANDLE→object；引用 per-process、物件全域有 refcount；檢查在「拿」不在「用」 | note 05 §6 fd / SCM_RIGHTS、§13 Mach port |
-| 2 | 一扇門 | user / kernel 只有 trap 一個入口（syscall、中斷、page fault）；「誰讓它動」追到底是這三種之一 | note 02 中斷；note 05 §12 trap；經驗 01 §4 門的長相由 ISA 定 |
+| 2 | 一扇門 | user / kernel 只有 trap 一個入口（syscall、中斷、page fault）；「誰讓它動」追到底是這三種之一 | note 02 中斷；note 05 §12 trap；經驗 01 §4 門的長相由 ISA 定；note 06 §6 guest kernel → hypervisor 的 VM exit 是同一扇門再往下一層 |
 | 3 | 樹狀繼承 vs 橫向傳遞 | ucred、fd table、cwd、env 沿 process tree 往下複製；橫向只能走 IPC 且 kernel 蓋章 | note 05 §5 label 血緣、§7 audit token、§11 繼承表 |
 | 4 | 介面 vs 實作 | POSIX 規定 `fork()` 長什麼樣，不規定是 syscall 還是 clone 的包裝 | note 05 §11 clone vs fork / spawn；經驗 01 §3 API vs ABI、§9 同一個 POSIX API 兩家 libc |
 | 5 | 機制 vs 政策 | kernel 提供機制（MAC hook、context switch、page 替換），政策另外餵（SBPL、nice、LRU） | note 05 §2–§3 Seatbelt |
