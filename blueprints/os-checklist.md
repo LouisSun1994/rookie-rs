@@ -2,7 +2,7 @@
 
 > [`os.md`](os.md) 是地圖，這份是進度表：六個子系統各挖到哪裡、下一條線挖什麼、還有哪些題沒答。
 > 每份 note 或經驗入庫後回來做三件事：覆蓋表「已挖到」補 note 編號、把對應項目從「還沒碰」移走；待挖路線打勾並記 note 編號；未答的題有答案的打勾並註記出處。
-> 建立日期：2026-11-05｜最近更新：2026-11-05
+> 建立日期：2026-11-05｜最近更新：2026-11-09
 
 ---
 
@@ -12,9 +12,9 @@
 |---|---|---|
 | ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
 | ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
-| ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9） | inode 是什麼、目錄只是 name→inode 表、hard / soft link、unlink 只刪名字、mount 怎麼接樹 |
-| ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13） | IPC 全家福對照（pipe / FIFO / unix socket / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
-| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10） | Linux 四根柱子（namespace / cgroup / seccomp / LSM）→ 容器；隔離三層級 |
+| ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
+| ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
+| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6） | Linux 四根柱子（namespace / cgroup / seccomp / LSM）→ 容器；隔離三層級 |
 | ⑥ 裝置 | driver 兩半、ioctl、DMA、中斷（02 / 03） | block layer 與 page cache 的接點 |
 
 ## 2. 待挖路線（每條一份 note）
@@ -77,6 +77,13 @@
 **Mach**
 
 - [ ] fd table 繼承在 port 這邊的對應是什麼？fork 後不 exec 為何 undefined——哪種 right 複製了會出事？launchd 持有 daemon 信箱的 receive 還是 send right？client 要 `mach-register` 自己得交出什麼？
+
+**sandbox 與 socket**（經驗 02 留下）
+
+- [ ] Seatbelt 的 `remote unix-socket` filter 拿到的是 `connect()` 傳入的字串還是 `namei` 解析後的路徑？經驗 02 §4 觀察到 symlink 不命中，但沒看 Sandbox.kext 在哪個 hook 取路徑；`file-read*` 對 symlink 本身的檢查又是在哪一步？
+- [ ] `allowUnixSockets` 的 glob 不生效是 harness 翻成 `literal` 還是 Seatbelt 的 `regex` filter 對 unix-socket 不適用？（經驗 02 §4 推論，待查 harness 產出的 SBPL）
+- [ ] 一條 HTTP `CONNECT` 建好後 proxy 變成純 TCP 管子：proxy 還能看到什麼？`allowedDomains` 對 CONNECT 的 host 檢查發生在哪一刻，隧道內的 SSH 握手它看得到嗎？
+- [ ] ssh-agent 的 socket 權限 `srw-------` 是 DAC；同 uid 的任何 process 都連得上。Seatbelt 之外，macOS 有什麼機制能限制「哪個 process 可以請 agent 簽名」？（提示：agent 看得到 client 的 pid 嗎、`LOCAL_PEERCRED`）
 
 **libc / ABI / 載入器**（經驗 01 留下；經驗 01 §11 有入庫時推的答案，待 /校正）
 

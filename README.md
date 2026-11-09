@@ -144,6 +144,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 編號 | 主題 | 起因 | 接在哪裡 | 日期 |
 |---|---|---|---|---|
 | [01](experiences/01-libc-abi-alpine.md) | libc 住哪一層、API vs ABI vs ISA、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`、依賴的四種與靜態連結消掉哪一種 | Debian 上編的 Rust binary 丟進 Alpine 容器，`sh: not found` | note 04 ELF 段的下半段、note 05 exec 換映像；藍圖 ②、模式 4 / 6 | 2026-11-05 |
+| [02](experiences/02-ssh-agent-sandbox-socket-proxy.md) | SSH 認證的三關（網路 / 設定檔 / 簽名）、ssh-agent 把 key 關在記憶體與 keychain 三種壽命、unix socket 的 `connect` 走 `namei` 所以 MAC 比對解析後路徑（symlink 與 glob 都不算）、launchd 隨機 socket 與 `/var/run` `/private` 的意義、sandbox 單一 proxy 出口與 `ProxyCommand` CONNECT 隧道、kernel 層 vs harness 分類器 | 想在 Claude Code sandbox 內直接 `git push`：`~/.gitconfig` 不可讀 → `Could not resolve hostname` → `Error connecting to agent` | note 05 §3 filter、§8 `namei → MAC hook`、§9 兩層；藍圖 ③ ④ ⑤ | 2026-11-06 → 2026-11-09 |
 
 ## 階段路線圖
 
@@ -155,7 +156,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器，再從一次 sandbox 內 `git push` 不通挖到 ssh-agent、unix socket 的路徑解析與 proxy 單一出口）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
 
 ## 慣例
 
