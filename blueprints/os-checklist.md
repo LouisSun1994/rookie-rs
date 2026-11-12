@@ -14,7 +14,7 @@
 | ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
 | ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
 | ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4）；跨 VM 管線：9P over hvsocket、AF_VSOCK ↔ AF_HYPERV、binfmt_misc 把 `.exe` 交給 interop（06 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
-| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
+| ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；passphrase 是檔案內容的加密、與 DAC / MAC 的「讀不讀得到」分屬兩層，agent 的信任邊界與鑰匙圈（經驗 02 §3.5–§3.7）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
 | ⑥ 裝置 | driver 兩半、ioctl、DMA、中斷（02 / 03） | block layer 與 page cache 的接點 |
 
 ## 2. 待挖路線（每條一份 note）
@@ -85,6 +85,9 @@
 - [ ] `allowUnixSockets` 的 glob 不生效是 harness 翻成 `literal` 還是 Seatbelt 的 `regex` filter 對 unix-socket 不適用？（經驗 02 §4 推論，待查 harness 產出的 SBPL）
 - [ ] 一條 HTTP `CONNECT` 建好後 proxy 變成純 TCP 管子：proxy 還能看到什麼？`allowedDomains` 對 CONNECT 的 host 檢查發生在哪一刻，隧道內的 SSH 握手它看得到嗎？
 - [ ] ssh-agent 的 socket 權限 `srw-------` 是 DAC；同 uid 的任何 process 都連得上。Seatbelt 之外，macOS 有什麼機制能限制「哪個 process 可以請 agent 簽名」？（提示：agent 看得到 client 的 pid 嗎、`LOCAL_PEERCRED`）
+- [ ] `ssh-add --apple-use-keychain` 把 passphrase 存在哪一種鑰匙圈？為什麼 `security` 指令與「鑰匙圈存取」都列不出來，`--apple-load-keychain` 卻讀得到？（經驗 02 §3.6 推論：Data Protection 鑰匙圈；待查 Apple 的 OpenSSH patch 用的 `SecItem` 屬性與 access group）
+- [ ] 檔案沒加密的 key 為什麼鑰匙圈裡有項目？對沒 passphrase 的 key 跑 `--apple-use-keychain` 實測不建項目，那一筆是哪條路建的：以前有過 passphrase、舊版行為、還是 ssh client 的 `UseKeychain yes`？（經驗 02 §3.6，三個假設都未驗證；切入點：新產一把沒 passphrase 的 key，分別走 `ssh-add --apple-use-keychain` 與 `Host` 段的 `UseKeychain yes`，各用臨時 agent 看誰被載回）
+- [ ] `IdentitiesOnly yes` 之下，ssh 怎麼把「指名的 identity 檔」對回 agent 的清單：讀 `.pub`，還是私鑰檔裡的明文公鑰區？sandbox 內只放行 `<key>.pub` 並把 `IdentityFile` 指向它，能不能同時保住 `IdentitiesOnly` 與 agent？（經驗 02 §3.3 補強：man page 說可以，未實測）
 
 **WSL2 / hypervisor**（note 06 留下）
 
