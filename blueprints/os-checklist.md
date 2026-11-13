@@ -11,7 +11,7 @@
 | 子系統 | 已挖到 | 還沒碰的核心 |
 |---|---|---|
 | ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11）；一個 process 裡 main thread 跑 loop、executor 把讀寫不衝突的 system 丟到 worker thread、另有 Render thread（經驗 03 §7、§11；§11 是骨架，未逐條走過） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
-| ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§11 t5–t7；骨架，未逐條走過） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
+| ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§11 t5–t7；骨架，未逐條走過）；編譯與連結是兩步、目的檔的空格由 `ld` 照符號名字填、`ld`（建置期）與 `dyld`（執行期）的分工、Rust crate 之間靜態而系統函式庫動態（經驗 03 §10 步驟 1「為什麼要裝它」） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
 | ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
 | ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4）；跨 VM 管線：9P over hvsocket、AF_VSOCK ↔ AF_HYPERV、binfmt_misc 把 `.exe` 交給 interop（06 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
 | ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；passphrase 是檔案內容的加密、與 DAC / MAC 的「讀不讀得到」分屬兩層，agent 的信任邊界與鑰匙圈（經驗 02 §3.5–§3.7）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
@@ -112,3 +112,5 @@
 
 - [ ] 第一次 `cargo run` 跑起來，terminal 那行 `AdapterInfo { ... }` 的 backend 是不是 Metal？是哪個 crate 印的、在時間軸的哪一步？（經驗 03 §10 步驟 9 推論、§11 t10）
 - [ ] 帶 `dynamic_linking` 編出來的 `./target/debug/snake` 不經 `cargo run` 直接執行，是不是報 dyld 找不到 `libbevy_dylib`？`cargo run` 替它多設了什麼、發佈時為什麼要拿掉這個 feature？（經驗 03 §10 排錯表推論、§11 t5）
+- [ ] Bevy 開了 `dynamic_linking` 之後，「Rust crate 之間靜態、系統函式庫動態」那張圖的哪一條線從靜態變成動態？（經驗 03 §10 步驟 1、步驟 9）
+- [ ] 一個 `main` 是空的、完全沒用到 `println!` 的 Rust 程式，在 macOS 上還需要 dyld 嗎？（經驗 03 §10 步驟 1）

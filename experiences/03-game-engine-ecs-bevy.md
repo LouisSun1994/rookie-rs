@@ -6,7 +6,7 @@
 > 起因：想獨立做一款遊戲，第一步選引擎就卡住：有哪些、要不要錢、「Godot 是 PC 端的嗎」、code agent 都能寫程式了引擎還有沒有差。
 > 接在哪裡：[note 03](../notes/03-gpu-stack-driver-kernel.md)（「引擎」這個詞、GPU 那條鏈的下半段）、[note 04 §4](../notes/04-borrow-exclusivity-lifetime-elf.md)（多讀 XOR 單寫）、[經驗 01 §5、§7](01-libc-abi-alpine.md)（target triple、動態載入器）、[note 05 §13](../notes/05-macos-sandbox-seatbelt-proc-cred.md)（Mach）。OS 藍圖：子系統 ①（一個 process 裡的 main thread、worker、Render thread）、②（dyld 載入 dylib 與 framework）。
 > 時效：Bevy 0.20 於 2026-10-08 釋出，`cargo add bevy@0.20` 解析到 0.20.1；Godot 穩定版 4.7（2026-06）；各引擎的授權費用。皆為 2026-11 時的狀態，費用以官網為準。
-> 來源與驗證狀態：§3–§9 來自這條線的對話。§2 分層與 §11 思維鏈是整理時由導師補上的骨架，對話裡沒有逐條走過；其中執行緒與 schedule 的順序對照過 Bevy 0.20.1 原始碼。§10 的兩段程式碼與 `Cargo.toml` 在 Linux 上對 bevy 0.20.1 跑過 `cargo check`（rustc 1.97.0 加 `--ignore-rust-version`）；**§10 的指令還沒在 Mac 上實跑過**，標「推論」的是依機制推出來、沒有重現過的。§1 事件與 §12 解法對照是整理進 repo 時依本文其他章節重排的，沒有新增內容。沒有腦筋急轉彎留在本文；待實跑確認的兩處推論記在 [`blueprints/os-checklist.md`](../blueprints/os-checklist.md)。
+> 來源與驗證狀態：§3–§9 來自這條線的對話。§2 分層與 §11 思維鏈是整理時由導師補上的骨架，對話裡沒有逐條走過；其中執行緒與 schedule 的順序對照過 Bevy 0.20.1 原始碼。§10 的兩段程式碼與 `Cargo.toml` 在 Linux 上對 bevy 0.20.1 跑過 `cargo check`（rustc 1.97.0 加 `--ignore-rust-version`）；**§10 的指令還沒在 Mac 上實跑過**，標「推論」的是依機制推出來、沒有重現過的。§1 事件與 §12 解法對照是整理進 repo 時依本文其他章節重排的，沒有新增內容。§10 步驟 1 的「為什麼要裝它」、§1 的 t7 與陷阱 21–24 是入庫當天的追問，在整理 repo 的 session 裡問答，不是原本那條線的導師，也沒有在 Mac 上逐項驗證。沒有腦筋急轉彎留在本文；待實跑確認的推論與追問留下的兩題記在 [`blueprints/os-checklist.md`](../blueprints/os-checklist.md)。
 
 ---
 
@@ -27,6 +27,8 @@ t4  Bevy 每幾個月一次破壞性改版    版本怎麼鎖、agent 寫出舊�
 t5  定第一款                     貪吃蛇：小，但會碰到 Bevy 的每個基本概念            → §9
 t6  macOS 從零建環境             排出步驟 0–13 與最小程式；程式碼在 Linux 上
                                  cargo check 過，指令還沒在 Mac 上實跑              → §10
+t7  讀到步驟 1 卡住               為什麼要裝 Xcode Command Line Tools、「rustc 不自己做連結」
+                                 是什麼意思、為什麼會用到 clang                     → §10 步驟 1
 ```
 
 當時的模型，每一條都會讓選擇走偏（括號是 §13 陷阱清單的編號）：
@@ -39,6 +41,13 @@ t6  macOS 從零建環境             排出步驟 0–13 與最小程式；程�
 - 「六個平台都支援」= 六個平台一樣好出 →「支援」只表示引擎能在上面跑，不含打包、上架、內購那一段（6）。
 - 「用規則檔綁住 agent，版本迭代的問題就解決了」→ 解決大部分；agent 沒學過的新功能、好不好玩，這兩件擋不住（7）。
 - 引擎之外順帶被校正的三個：把「端遊」當成手機上的遊戲、把原型當成上架的小產品、以為人手一機所以手機是最好的市場（18–20）。
+
+t7 那一段連續被校正了四次，每一句都是當時說出口的（21–24）：
+
+- 「要裝 Xcode」→ 要裝的是 Command Line Tools，不是那個 IDE（21）。
+- 「Rust compile 完還是要跟 C 做 dynamic linker」→ 把建置時的 `ld` 和執行時的 `dyld` 混成一個；出現「C」是因為 C ABI 和 `cc` 這個入口，沒有 C 原始碼被編譯（22）。
+- 「透過 cc 做 ABI 串接」→ `cc` 只是啟動 `ld` 的手段；ABI 是 `rustc` 編譯時就遵守的約定，`ld` 只認名字（23）。
+- 「裝這包是為了取得 rustc 跟 clang；不裝就是自己配路徑」→ `rustc` 來自 rustup；不裝是東西不存在，繞不過去的是 SDK（24）。
 
 陷阱 8–17 屬於 ECS 與建置那一側，跟著 §7–§10 收在陷阱清單。
 
@@ -311,6 +320,48 @@ xcrun --show-sdk-path      # macOS SDK 的位置
 
 - 不需要完整的 Xcode，Command Line Tools 就夠。
 - SDK 裡放的是 framework 的 header 和連結用的 stub。連結時 `ld` 靠它知道「AppKit 有這些符號」，真正的 framework 本體在系統裡，執行時由 dyld 載入。
+
+#### 為什麼要裝它：編譯和連結是兩個步驟
+
+**核心規則**：把原始碼變成執行檔有兩步，`rustc` 只親手做第一步。連結需要的三樣東西（操作員 `cc`、機器 `ld`、零件目錄 macOS SDK）都是 Apple 的，只透過這包發放；`rustc` 是另外由 rustup 裝的，它只是這三樣東西的使用者。
+
+| 步驟 | 做什麼 | 誰做 | 產物 |
+|---|---|---|---|
+| 編譯 compile | 把一個 crate 的原始碼翻成機械碼 | `rustc` 自己 | 目的檔（`.o` / `.rlib`） |
+| 連結 link | 把很多份目的檔接成一個能執行的檔案 | `ld`（`rustc` 透過 `cc` 叫它） | Mach-O 執行檔 |
+
+目的檔是半成品。`rustc` 一次只看一個 crate，不知道別的 crate 和系統函式庫最後擺在哪，呼叫 `write` 的地方只能先留空格，附一張「我缺 `write` 的位址」的清單。`ld` 把所有目的檔擺在一起、決定最終位置、把空格填上（或記下「執行時去 libSystem 找」）。
+
+```
+t0  rustc          把你的 crate 編成目的檔；呼叫系統函式的機械碼在這一刻就照 C ABI 擺好參數
+t1  rustc → cc     「幫我把這些接成執行檔」            ← 沒裝：linker 'cc' not found
+t2  cc → ld        cc 補上 SDK 路徑、最低 macOS 版本、架構、libSystem、啟動碼，再叫 ld
+                                                     ← 沒裝：xcrun: invalid active developer path
+t3  ld             照符號名字把目的檔接起來；對系統函式庫只記「需要 libSystem 的 write」
+t4  （執行時）dyld  載入 libSystem 與 framework 本體，填上那筆空格   ← 這時已經不需要 SDK
+```
+
+- **clang 在這裡一行 C 都沒編。** 它收到 `.c` 才當編譯器；收到的全是目的檔時只做一件事：用對的參數啟動 `ld`。`rustc` 要的是「它知道怎麼叫 `ld`」，那串參數每個平台、每個 OS 版本都不同。
+- **ABI 是約定，不是動作，沒有人在「串 ABI」。** 遵守 C ABI 是 `rustc` 在 t0 產生機械碼時的事；`ld` 在 t3 只認符號名字，不檢查兩邊擺法對不對。
+- **`ld` 和 `dyld` 是兩個時間的兩個程式。**
+
+| | linker（`ld`） | dynamic linker（`dyld`） |
+|---|---|---|
+| 什麼時候跑 | 建置時的最後一步 | 每次執行程式時 |
+| 做什麼 | 把目的檔組成執行檔；對系統函式庫只記名字 | 把函式庫載進記憶體，填上真正位址 |
+| 誰提供 | Command Line Tools | macOS 內建 |
+
+- **哪些是靜態、哪些是動態。** Rust crate 之間（你的程式、std、bevy）建置時由 `ld` 靜態接在一起，全進執行檔；只有碰到作業系統那一層（libSystem、AppKit、Metal）才是動態的，那一層講的是 C ABI。macOS 規定只能透過 libSystem 進 kernel、不提供靜態版，所以任何語言的程式都動態連結它；Linux 承諾 syscall ABI 穩定，才做得出完全靜態的 musl 執行檔（經驗 01 §6、§9）。
+- **不是 Bevy 才需要。** `Hello, world!` 也要連結 libSystem，步驟 5 的第一次 `cargo run` 就會用到。
+- **不裝的話，問題是東西不存在，不是路徑沒設好。** 全新的 Mac 上 `/usr/bin/cc` 只是空殼，執行它會跳出安裝對話框；`ld` 和 SDK 根本沒有。
+
+| 不透過這包的做法 | 可不可行 |
+|---|---|
+| 裝完整 Xcode | 可以，裡面是同一套東西，只是大很多 |
+| 自己裝別的 linker（LLVM 的 lld） | linker 有了，SDK 還是沒有，照樣連不起來（推論） |
+| 完全不裝 Apple 的東西 | 不行，卡在 SDK |
+
+繞不過去的是 SDK，不是 clang。能「設路徑」的是反過來的情況：同一套東西裝了不只一份（Command Line Tools 加完整 Xcode），用 `xcode-select -s` 選用哪一份。
 
 ### 步驟 2：安裝 rustup
 
@@ -655,3 +706,10 @@ t17  WindowServer（另一個 process）     user           WindowServer        
 18. ❌ 「端遊」指手機上的遊戲（用詞） → ✅ 端遊是客戶端遊戲，也就是 PC；手機上的是手遊。
 19. ❌ 原型（prototype）是上架的小產品，所以大家做原型會塞爆市場、會被抄 → ✅ 原型是只有自己和幾個測試者玩過的內部試作，不進市場 → 目的是在投入一年之前先確認核心好不好玩。
 20. ❌ 人手一機，所以手機是最好的潛在市場 → ✅ 使用者最多不等於機會最大：手機商店的曝光幾乎全靠買量、免費加內購需要長期營運、仿製速度最快 → 比較穩的順序是先在 PC 驗證，再移植手機。
+
+**續：為什麼要裝 Command Line Tools（§10 步驟 1）**
+
+21. ❌ 要裝 Xcode（用詞） → ✅ 要裝的是 Xcode Command Line Tools：只有命令列工具與 SDK 的小套件，不含 IDE。
+22. ❌ Rust compile 完還是要跟 C 做 dynamic linker → ✅ 兩件事：建置時 `ld` 把 Rust crate 靜態接成執行檔，對系統函式庫只記名字；執行時 `dyld` 才把 libSystem 接上。沒有 C 原始碼被編譯，系統函式庫對外講的是 C ABI → 混成一個就推不出「為什麼做好的遊戲拿到沒裝 Command Line Tools 的 Mac 照樣能跑」：`ld` 只在建置時出場，`dyld` 是系統內建。
+23. ❌ `cc` 在做 ABI 串接 → ✅ `cc` 只是用對的參數啟動 `ld` 的手段；ABI 是約定，`rustc` 產生機械碼時就照它擺好了，`ld` 只照符號名字接 → `ld` 不檢查擺法，所以 ABI 沒對齊時連結照過、執行才壞（經驗 01 §3）。
+24. ❌ 裝這包是為了取得 `rustc` 跟 clang；不裝就是自己配路徑 → ✅ `rustc` 來自 rustup，這包給的是 `cc`、`ld`、macOS SDK、`git`；不裝是東西不存在，不是找不到 → 路徑只能指向已經在機器上的檔案；linker 有替代品，SDK 只有 Apple 發。
