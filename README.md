@@ -147,6 +147,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 |---|---|---|---|---|
 | [01](experiences/01-libc-abi-alpine.md) | libc 住哪一層、API vs ABI vs ISA、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`、依賴的四種與靜態連結消掉哪一種 | Debian 上編的 Rust binary 丟進 Alpine 容器，`sh: not found` | note 04 ELF 段的下半段、note 05 exec 換映像；藍圖 ②、模式 4 / 6 | 2026-11-05 |
 | [02](experiences/02-ssh-agent-sandbox-socket-proxy.md) | SSH 認證的三關（網路 / 設定檔 / 簽名）、ssh-agent 把 key 關在記憶體與 keychain 三種壽命、unix socket 的 `connect` 走 `namei` 所以 MAC 比對解析後路徑（symlink 與 glob 都不算）、launchd 隨機 socket 與 `/var/run` `/private` 的意義、sandbox 單一 proxy 出口與 `ProxyCommand` CONNECT 隧道、kernel 層 vs harness 分類器；續：agent 是簽名代辦不是 proxy、一把 key 的四樣東西（公鑰 / 私鑰檔 / passphrase / 解開的 key）、終端機兩條路 vs sandbox 一條路、key 回到 agent 的三條路與鑰匙圈項目、passphrase 加密的是檔案內容不是讀取權限、`IdentitiesOnly` 在 sandbox 內的坑、config 的 `Host` 段與 `Match` 段分工 | 想在 Claude Code sandbox 內直接 `git push`：`~/.gitconfig` 不可讀 → `Could not resolve hostname` → `Error connecting to agent`；三天後重開機，sandbox 內 `Permission denied (publickey)` 而終端機正常 | note 05 §3 filter、§8 `namei → MAC hook`、§9 兩層；藍圖 ③ ④ ⑤ | 2026-11-06 → 2026-11-12 |
+| [03](experiences/03-game-engine-ecs-bevy.md) | 遊戲引擎 = runtime + 工具鏈（main loop 屬於引擎、編輯器跑在哪與遊戲輸出到哪是兩回事）、引擎一覽與費用、選引擎的三個變數與 agent 友善度、Bevy 現況（沒有編輯器、UI 年輕、各平台支援到哪）、ECS 是每幀被查詢和更新的資料庫與 executor 怎麼排 system、`Cargo.lock` 鎖版與 agent 規則檔、貪吃蛇會碰到的概念、macOS 建置步驟 0–13（尚未在 Mac 上實跑）、`cargo run` 到第一幀的時間軸 | 想獨立做一款遊戲，第一步選引擎就卡住：引擎到底是什麼、該挑哪個、code agent 都能寫程式了還有沒有差 | note 03 引擎與 GPU 鏈、note 04 §4 多讀 XOR 單寫、經驗 01 §5 / §7、note 05 §13 Mach；藍圖 ① ② | 2026-11-13 |
 
 ## 階段路線圖
 
@@ -158,7 +159,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 | 🦞 熟練 | thread/channel/Mutex、async/tokio、trait object、效能分析、serde/clap/anyhow/axum |
 | 🐊 巨鱷 | unsafe/FFI、macro、記憶體佈局、零成本抽象原理、API 設計、讀 std 原始碼 |
 
-目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照，再從 WSL2 往下挖到 hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 與 VM / container / sandbox 三層隔離的對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器，再從一次 sandbox 內 `git push` 不通挖到 ssh-agent、unix socket 的路徑解析與 proxy 單一出口，以及 key 怎麼回到 agent、passphrase 與鑰匙圈各管什麼）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
+目前位置：🥚 小白（尚未動手寫程式；已概念性走完 🐣 的 borrowing 與 🦀 的 lifetime，探索到 🦀/🦞 的 smart pointer、async、concurrency、Mutex / Atomic，以及 🐊 的 FFI / C ABI、GPU driver 分層、ELF 記憶體佈局與 macOS Seatbelt 的 MAC / proc cred / fd 層，再順著 sandbox 線往下走到 Mach port、硬體 trap 邊界，以及 Windows / WSL2 的安全模型對照，再從 WSL2 往下挖到 hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 與 VM / container / sandbox 三層隔離的對照；另從一次 Alpine 容器跑不起來挖到 libc / ABI / ISA 與動態載入器，再從一次 sandbox 內 `git push` 不通挖到 ssh-agent、unix socket 的路徑解析與 proxy 單一出口，以及 key 怎麼回到 agent、passphrase 與鑰匙圈各管什麼；又從「想獨立做一款遊戲，引擎該挑哪個」挖到遊戲引擎是 runtime + 工具鏈、Bevy 與 ECS、`Cargo.lock` 鎖版，排好 macOS 上第一個 Bevy 專案的建置步驟，準備第一次動手）。OS 這個方向的地圖與進度在 `blueprints/`，事件驅動的理解在 `experiences/`。
 
 ## 慣例
 
