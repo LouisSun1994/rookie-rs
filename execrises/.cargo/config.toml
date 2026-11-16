@@ -1,0 +1,2 @@
+[alias]
+q1 = "run --bin q01_collatz"
