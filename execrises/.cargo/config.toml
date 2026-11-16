@@ -1,2 +1,3 @@
 [alias]
 q1 = "run --bin q01_collatz"
+q1r = "run --release --bin q01_collatz"
