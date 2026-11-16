@@ -1,7 +1,7 @@
 # Experience 02 — ssh-agent、unix socket 與單一出口：sandbox 裡的 `git push` 為什麼要過三關
 
 > 經驗不是筆記：起點是一個實際撞到的問題，往下挖到能解釋它為止。這一篇從「想在 Claude Code 的 sandbox 裡直接 `git push`，結果 `Operation not permitted`」出發，挖到 SSH 認證要過哪三層、ssh-agent 把 key 關在哪裡、unix socket 的路徑是怎麼被比對的（symlink 為什麼沒用）、launchd 的 socket 為什麼每次開機換名字、以及 sandbox 的網路為什麼只有一個洞。三天後重開機、同一條路又斷了一次，再往下挖到：key 是怎麼回到 agent 的、passphrase 與鑰匙圈各管什麼、agent 為什麼不是 proxy。
-> 記錄日期：2026-11-06 → 2026-11-12｜當時定位：🥚 小白（仍未動手寫程式；這條線是 note 05 Seatbelt 的實戰續篇，碰到 VFS 路徑解析、unix socket、HTTP CONNECT）
+> 當時定位：🥚 小白（仍未動手寫程式；這條線是 note 05 Seatbelt 的實戰續篇，碰到 VFS 路徑解析、unix socket、HTTP CONNECT）
 > 起因：在 sandbox 內跑 `git status` 先死在 `~/.gitconfig`，放行後 `git push` 死在 `ssh: Could not resolve hostname github.com`；再查 `ssh-add -l` 回 `Error connecting to agent: Operation not permitted`。續集（2026-11-12）：重開機後，sandbox 內對第二個 git 主機 `git fetch` 回 `Permission denied (publickey)`，同一時間終端機卻是好的。
 > 接在哪裡：note 05 §3（SBPL filter：`literal` 與 `remote unix-socket`、`network-outbound (remote ip "localhost:PORT")` 那條就是本篇的 proxy）、§8（`namei → vnode → MAC hook`：symlink 在 MAC 看到之前就解掉了）、§9（kernel 層與 harness 層各管什麼：本篇最後被攔的那一下是 harness 層）。OS 藍圖：子系統 ③（名字 → vnode）、④（unix socket）、⑤（MAC filter）。
 > 本篇多數結論是**實驗觀察**（每一步都實際跑過：在 sandbox 內，或需要讀 key 檔時在自己的終端機）；少數是從觀察推的解釋，標 **推論**，未經導師確認。標 **補強** 的 blockquote 是整理進 repo 時對照 man page 補的，同樣未經導師確認。沒有腦筋急轉彎留在本文，未答的題記在 [`blueprints/os-checklist.md`](../blueprints/os-checklist.md)。

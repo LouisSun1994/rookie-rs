@@ -1,7 +1,7 @@
 # Experience 01 — libc、ABI 與 Alpine：Debian 上編的 binary 為什麼在 Alpine「not found」
 
 > 經驗不是筆記：起點不是一個想挖的主題，而是一個實際撞到的問題，往下挖到能解釋它為止。這一篇從「Rust binary 丟進 Alpine 容器跑不起來、shell 說 `not found`」出發，挖到 libc 住哪一層、API / ABI / ISA 三份契約、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`，最後是「依賴」其實有四種、靜態連結只消掉一種。
-> 記錄日期：2026-11-05｜當時定位：🥚 小白（仍未動手寫程式；這條線碰到 🐊 的 FFI / C ABI 與 ELF 載入）
+> 當時定位：🥚 小白（仍未動手寫程式；這條線碰到 🐊 的 FFI / C ABI 與 ELF 載入）
 > 起因：在 Debian 上用 Rust 預設 target 編的 binary，放進 Alpine 容器執行，`sh: /app/app: not found`。檔案明明在。
 > 接在哪裡：note 04「`static` / `const` / `'static` / section / ELF」段的下半段（linker 之後、loader 這一側）；note 05 §5 與 §11 的「exec 換映像」。OS 藍圖：子系統 ②、模式 4（介面 vs 實作）與模式 6（名字空間）。
 > §11 是這條線留下的十題腦筋急轉彎，答案是入庫時整理者推的（標 **補強**，未經導師確認）；對應的 checklist 條目在 [`blueprints/os-checklist.md`](../blueprints/os-checklist.md)。

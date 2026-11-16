@@ -2,8 +2,8 @@
 
 > 經驗不是筆記：起點是一個實際撞到的問題，往下挖到能解釋它為止。這一篇撞到的不是錯誤訊息，是一個卡住的決定：想獨立做一款遊戲，卻說不清「引擎」到底是什麼、該挑哪個。從引擎一覽與費用起步，經過「code agent 時代引擎還有沒有差」，落到 Bevy（Rust 寫的 ECS 引擎）的現況、ECS 的模型、版本怎麼鎖，最後定下第一款做貪吃蛇，並把 macOS 上從零到第一個視窗的建置步驟排出來。
 > 核心收穫是四句話：**引擎 = 執行期的一包函式庫（runtime）+ 開發期的工具鏈**，兩半各有各的平台；**引擎很少是成敗的瓶頸，但目標平台、遊戲類型、誰是寫程式的主力這三個變數會改變答案**；**ECS 是一個每幀被查詢和更新的記憶體內資料庫**，system 只是函式，跑它的是 executor；**鎖住版本的是 `Cargo.lock`，不是 `Cargo.toml`**。
-> 2026-11-16 照步驟在 Mac 上實跑之後，又順著 `cargo run` 把建置那一半往下挖：cargo、rustc、linker 三個 process 怎麼接力、rustc 的多層 IR 與 LLVM（§11），以及 crate、feature、ABI、靜態與動態連結這幾個名詞各指什麼（§12）。
-> 記錄日期：2026-11-13（2026-11-16 補 §11、§12）｜當時定位：🥚 小白，第一次準備動手寫程式。
+> 照步驟在 Mac 上實跑之後，又順著 `cargo run` 把建置那一半往下挖：cargo、rustc、linker 三個 process 怎麼接力、rustc 的多層 IR 與 LLVM（§11），以及 crate、feature、ABI、靜態與動態連結這幾個名詞各指什麼（§12）。
+> 當時定位：🥚 小白，第一次準備動手寫程式。
 > 起因：想獨立做一款遊戲，第一步選引擎就卡住：有哪些、要不要錢、「Godot 是 PC 端的嗎」、code agent 都能寫程式了引擎還有沒有差。
 > 接在哪裡：[note 03](../notes/03-gpu-stack-driver-kernel.md)（「引擎」這個詞、GPU 那條鏈的下半段）、[note 04 §4](../notes/04-borrow-exclusivity-lifetime-elf.md)（多讀 XOR 單寫）、[經驗 01 §3–§5、§7](01-libc-abi-alpine.md)（API 與 ABI、ISA、target triple、動態載入器）、[note 05 §13](../notes/05-macos-sandbox-seatbelt-proc-cred.md)（Mach）。OS 藍圖：子系統 ①（一個 process 裡的 main thread、worker、Render thread）、②（dyld 載入 dylib 與 framework）。
 > 時效：Bevy 0.20 於 2026-10-08 釋出，`cargo add bevy@0.20` 解析到 0.20.1；Godot 穩定版 4.7（2026-06）；各引擎的授權費用。皆為 2026-11 時的狀態，費用以官網為準。

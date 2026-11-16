@@ -3,7 +3,7 @@
 > 這份筆記記錄的是「`&` 到底是什麼」這條線：從 expression-based 與區塊回傳起步，穿過借用規則、borrow checker 所在的層、獨佔／原子／互斥三個詞的分辨、閉包與 `thread::spawn`，到 lifetime 與 `&'static str`，最後落到 `static` / `const` 與 ELF 區段。
 > 核心收穫不是語法，而是**每一條規則在哪一層生效（型別系統 / 語言 / std / OS / 硬體 / binary）、到了執行期還剩下什麼**——borrow checker 編譯完就消失，獨佔讓「原子與否」這個問題消失，`'static` 是壽命不是位置。
 >
-> 記錄日期：2026-11-03｜當時定位：🥚 小白（仍未動手寫程式），這條線概念上走完 🐣 的 borrowing、🦀 的 lifetime，並碰到 🦞 的 Mutex / Atomic 與 🐊 的記憶體佈局 / ELF。
+> 當時定位：🥚 小白（仍未動手寫程式），這條線概念上走完 🐣 的 borrowing、🦀 的 lifetime，並碰到 🦞 的 Mutex / Atomic 與 🐊 的記憶體佈局 / ELF。
 
 ---
 

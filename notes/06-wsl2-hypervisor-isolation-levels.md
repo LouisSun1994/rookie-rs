@@ -3,7 +3,7 @@
 > 這份筆記記錄的是「WSL2 具體是什麼」這條線：從 `wsl -d Ubuntu` 背後是一台 VM 還是一個容器起步，往下挖到 Hyper-V、hypervisor 與 CPU 的第三層特權模式、雲上的 VM 其實是同一種東西、Windows 上四種執行情境各跑在哪顆 kernel、namespace 是按子系統各一張表、以及 VM 什麼時候活什麼時候死。
 > 核心收穫是四句話：**WSL2 是一台 utility VM 加若干容器**——所有 distro 共用一顆 kernel，distro 只是 namespace + 自己的 vhdx；**hypervisor 不模擬**，guest 指令原生跑在 CPU 上，它只切硬體、擋特權動作；**隔離三層級是三條畫在不同位置的線**，疊加不是三選一；**VM 活著是結果不是原因**，有 process 才有 distro、有 distro 才有 VM。
 >
-> 記錄日期：2026-11-09｜當時定位：🥚 小白（仍未動手寫程式），OS / systems 支線。接在 [note 05 §10](05-macos-sandbox-seatbelt-proc-cred.md)（Windows 與 WSL2 對照）之後往下挖；也接 [經驗 01](../experiences/01-libc-abi-alpine.md)「跨 OS 必死，除非有人補一顆 kernel」那句——這份講的就是那顆 kernel 怎麼補進來。藍圖 ⑤ 安全、④ IPC；模式 2（一扇門再往下一層）、模式 6（名字→物件表，按子系統各一張）。
+> 當時定位：🥚 小白（仍未動手寫程式），OS / systems 支線。接在 [note 05 §10](05-macos-sandbox-seatbelt-proc-cred.md)（Windows 與 WSL2 對照）之後往下挖；也接 [經驗 01](../experiences/01-libc-abi-alpine.md)「跨 OS 必死，除非有人補一顆 kernel」那句——這份講的就是那顆 kernel 怎麼補進來。藍圖 ⑤ 安全、④ IPC；模式 2（一扇門再往下一層）、模式 6（名字→物件表，按子系統各一張）。
 > 時效：WSL 於 2025-05 開源（`microsoft/WSL`）；mirrored 網路 2023 起；Docker Desktop 預設 WSL2 backend；Claude Code 在 native Windows 不開 sandbox、WSL2 走 bubblewrap。皆為 2026-11 時的狀態。
 > 標「補強」的 blockquote 是整理進 repo 時加註、尚未經導師確認的延伸；其中標「推論」的連整理者都還沒查證，只是依模型推出來的。
 

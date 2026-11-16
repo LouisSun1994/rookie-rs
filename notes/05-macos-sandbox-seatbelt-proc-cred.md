@@ -3,9 +3,9 @@
 > 這份筆記記錄的是「為什麼 Claude Code 的 Bash 有時能跑、有時 `Operation not permitted`」這條線：從 `sandbox-exec` 與 SBPL 起步，穿過 kernel 的 MAC framework、process 的 credential 與 label、fork / exec / posix_spawn 的繼承規則、fd table 與 kernel 全域 file object、XPC 代辦與 `sandbox_check`，最後落到 DAC / MAC / VFS 三者的關係。
 > 核心收穫不是 Seatbelt 的語法，而是四句話：**sandbox 不是一個模式，是 process credential 上的一個欄位**；它跟著 fork / exec 的血緣走，不跟著 IPC 的請求走；檢查發生在「取得資源」的 syscall，不在「使用資源」的 syscall；kernel 是唯一看得到所有 process、又站在所有 syscall 路徑上的東西。
 >
-> 記錄日期：2026-11-04｜當時定位：🥚 小白（仍未動手寫程式），這條線是 OS / systems 支線，碰到 🐊 的 kernel 資料結構（`proc` / `ucred` / `fileglob`）、MAC framework 與 Mach IPC。Claude Code 這個產品本身的 sandbox 設計另記於 [rookie-llm Case 02](https://github.com/LouisSun1994/rookie-llm/blob/main/cases/02-claude-code-sandbox-seatbelt-design.md)，此處只記 OS 概念。
-> 2026-11-05 續：§9–§13、思維鏈 E–H、陷阱 23–37 來自這份 note 產出後的追問——從「Windows 上怎麼做」挖到多 agent 競爭與 flock、fork / exec 每個欄位的繼承真相、Linux 的 clone、硬體與 kernel 的分工、Mach。是同一條線的延伸、經導師校正，不是入庫加註。追問裡整理出的 OS 藍圖（家譜、六個子系統、七個模式）另放 [`blueprints/os.md`](../blueprints/os.md)。
-> 2026-11-09 續：§10 的 WSL2 圖依 [note 06](06-wsl2-hypervisor-isolation-levels.md) 修正（所有 distro 共用一台 VM 與一顆 kernel，pid 1 是 WSL 的 `/init`）；WSL2 那台 VM 本身——utility VM 的開機時間軸、hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 同構、VM / container / sandbox 三層對照——另記 note 06，本篇 §10 只留 Seatbelt 對照需要的部分。
+> 當時定位：🥚 小白（仍未動手寫程式），這條線是 OS / systems 支線，碰到 🐊 的 kernel 資料結構（`proc` / `ucred` / `fileglob`）、MAC framework 與 Mach IPC。Claude Code 這個產品本身的 sandbox 設計另記於 [rookie-llm Case 02](https://github.com/LouisSun1994/rookie-llm/blob/main/cases/02-claude-code-sandbox-seatbelt-design.md)，此處只記 OS 概念。
+> 續：§9–§13、思維鏈 E–H、陷阱 23–37 來自這份 note 產出後的追問——從「Windows 上怎麼做」挖到多 agent 競爭與 flock、fork / exec 每個欄位的繼承真相、Linux 的 clone、硬體與 kernel 的分工、Mach。是同一條線的延伸、經導師校正，不是入庫加註。追問裡整理出的 OS 藍圖（家譜、六個子系統、七個模式）另放 [`blueprints/os.md`](../blueprints/os.md)。
+> 續：§10 的 WSL2 圖依 [note 06](06-wsl2-hypervisor-isolation-levels.md) 修正（所有 distro 共用一台 VM 與一顆 kernel，pid 1 是 WSL 的 `/init`）；WSL2 那台 VM 本身——utility VM 的開機時間軸、hypervisor 與 VT-x / EPT、Hyper-V 的 root / child partition、雲上 VM 同構、VM / container / sandbox 三層對照——另記 note 06，本篇 §10 只留 Seatbelt 對照需要的部分。
 > Seatbelt 是 Apple 的 private API，operation / filter 清單來自逆向工程（Levin《*OS Internals》、Blazakis〈The Apple Sandbox〉）與 `/System/Library/Sandbox/Profiles/*.sb`，各版 macOS 有增減。
 > 標「補強」「補充」的 blockquote 是整理進 repo 時加註的延伸，不在原本這條線的對話裡。
 

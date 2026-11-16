@@ -3,7 +3,7 @@
 > 這份筆記記錄的是「一個語言要怎麼用到 GPU」這條線：從 PyTorch / Candle 這層引擎，往下穿過廠商 SDK、user-mode driver、`ioctl()` 邊界、kernel-mode driver，到硬體與 DMA；再拿儲存路（NVMe）當對照組。
 > 核心收穫不是 CUDA API，而是**每一層是誰寫的、跑在哪個 mode、誰搬資料、誰通知誰**——以及 Rust 在這條鏈上實際只佔哪一層。
 >
-> 記錄日期：2026-10-30｜當時定位：🥚 小白（仍未動手寫程式），這條線概念上碰到 🐊 的 FFI / C ABI、driver 與 DMA。
+> 當時定位：🥚 小白（仍未動手寫程式），這條線概念上碰到 🐊 的 FFI / C ABI、driver 與 DMA。
 > 標「補強」的 blockquote 是整理進 repo 時加註的延伸，不在原本這條線的對話裡。
 
 ---

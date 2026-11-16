@@ -1,6 +1,5 @@
 # Rust 學習筆記 01：從記憶體模型到 async runtime 與作業系統
 
-- 記錄日期：2026-10-07
 - 學習方式：概念優先（conceptual-first），先建立全貌再動手實作
 - 目前定位：🥚 小白階段（尚未動手寫程式），但已概念性探索到 🦀/🦞 階段的 smart pointer、async、concurrency，以及作業系統層的機制
 - 背景：熟悉 Go（GMP 排程模型）、後端 / 基礎設施、遊戲系統
