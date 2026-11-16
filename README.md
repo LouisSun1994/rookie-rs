@@ -127,28 +127,28 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
 ### 筆記索引
 
-| 編號 | 主題 | 日期 |
-|---|---|---|
-| [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 | 2026-10-07 |
-| [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 | 2026-10-08 |
-| [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 | 2026-10-30 |
-| [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 | 2026-11-03 |
-| [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷；續篇：Claude sandbox 兩層與多 agent（flock 掛 fileglob、git `.lock` 的 `O_EXCL`）、Windows token / ACL 與 WSL2 對照、fork / exec / spawn / thread 每個欄位的複製／共用／重設與 Linux `clone`、硬體只給門和隔間、Mach task / port | 2026-11-04 / 2026-11-05 |
-| [06](notes/06-wsl2-hypervisor-isolation-levels.md) | WSL2 是一台 utility VM + 若干容器（所有 distro 共用一顆 kernel，distro = namespace + vhdx）、`wsl.exe` 到 prompt 與 interop 逃逸點的時間軸、三條跨 VM 管線（9P / hvsocket）、VM / container / sandbox 三層隔離線畫在哪、hypervisor 不模擬（VT-x / EPT / VM exit 是一扇門再往下一層）、Hyper-V 的 root / child partition 與雲上 VM 同構、Windows 上四種執行情境、namespace 按子系統各一張表、VM 生命週期由 process 數決定 | 2026-11-09 |
+| 編號 | 主題 |
+|---|---|
+| [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、smart pointer、async runtime、作業系統層機制 |
+| [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 |
+| [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 |
+| [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 |
+| [05](notes/05-macos-sandbox-seatbelt-proc-cred.md) | macOS Seatbelt 是 kernel MAC 不是容器、SBPL 與 `sandbox-exec`（出題 / 閱卷分開）、`ucred.cr_label` 是第二個 uid、fork / exec / posix_spawn 的血緣繼承、fd table 與 `fileglob` capability、XPC 代辦與 `sandbox_check`、DAC / MAC / VFS 關係與 errno 診斷；續篇：Claude sandbox 兩層與多 agent（flock 掛 fileglob、git `.lock` 的 `O_EXCL`）、Windows token / ACL 與 WSL2 對照、fork / exec / spawn / thread 每個欄位的複製／共用／重設與 Linux `clone`、硬體只給門和隔間、Mach task / port |
+| [06](notes/06-wsl2-hypervisor-isolation-levels.md) | WSL2 是一台 utility VM + 若干容器（所有 distro 共用一顆 kernel，distro = namespace + vhdx）、`wsl.exe` 到 prompt 與 interop 逃逸點的時間軸、三條跨 VM 管線（9P / hvsocket）、VM / container / sandbox 三層隔離線畫在哪、hypervisor 不模擬（VT-x / EPT / VM exit 是一扇門再往下一層）、Hyper-V 的 root / child partition 與雲上 VM 同構、Windows 上四種執行情境、namespace 按子系統各一張表、VM 生命週期由 process 數決定 |
 
 ### 藍圖索引
 
-| 方向 | 藍圖 | checklist | 建立 |
-|---|---|---|---|
-| OS | [os.md](blueprints/os.md)：類 Unix 家譜、kernel 六個子系統、七個貫穿模式、資源 | [os-checklist.md](blueprints/os-checklist.md)：六個子系統覆蓋表、九條待挖路線、未答的題 | 2026-11-05 |
+| 方向 | 藍圖 | checklist |
+|---|---|---|
+| OS | [os.md](blueprints/os.md)：類 Unix 家譜、kernel 六個子系統、七個貫穿模式、資源 | [os-checklist.md](blueprints/os-checklist.md)：六個子系統覆蓋表、九條待挖路線、未答的題 |
 
 ### 經驗索引
 
-| 編號 | 主題 | 起因 | 接在哪裡 | 日期 |
-|---|---|---|---|---|
-| [01](experiences/01-libc-abi-alpine.md) | libc 住哪一層、API vs ABI vs ISA、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`、依賴的四種與靜態連結消掉哪一種 | Debian 上編的 Rust binary 丟進 Alpine 容器，`sh: not found` | note 04 ELF 段的下半段、note 05 exec 換映像；藍圖 ②、模式 4 / 6 | 2026-11-05 |
-| [02](experiences/02-ssh-agent-sandbox-socket-proxy.md) | SSH 認證的三關（網路 / 設定檔 / 簽名）、ssh-agent 把 key 關在記憶體與 keychain 三種壽命、unix socket 的 `connect` 走 `namei` 所以 MAC 比對解析後路徑（symlink 與 glob 都不算）、launchd 隨機 socket 與 `/var/run` `/private` 的意義、sandbox 單一 proxy 出口與 `ProxyCommand` CONNECT 隧道、kernel 層 vs harness 分類器；續：agent 是簽名代辦不是 proxy、一把 key 的四樣東西（公鑰 / 私鑰檔 / passphrase / 解開的 key）、終端機兩條路 vs sandbox 一條路、key 回到 agent 的三條路與鑰匙圈項目、passphrase 加密的是檔案內容不是讀取權限、`IdentitiesOnly` 在 sandbox 內的坑、config 的 `Host` 段與 `Match` 段分工 | 想在 Claude Code sandbox 內直接 `git push`：`~/.gitconfig` 不可讀 → `Could not resolve hostname` → `Error connecting to agent`；三天後重開機，sandbox 內 `Permission denied (publickey)` 而終端機正常 | note 05 §3 filter、§8 `namei → MAC hook`、§9 兩層；藍圖 ③ ④ ⑤ | 2026-11-06 → 2026-11-12 |
-| [03](experiences/03-game-engine-ecs-bevy.md) | 遊戲引擎 = runtime + 工具鏈（main loop 屬於引擎、編輯器跑在哪與遊戲輸出到哪是兩回事）、引擎一覽與費用、選引擎的三個變數與 agent 友善度、Bevy 現況（沒有編輯器、UI 年輕、各平台支援到哪）、ECS 是每幀被查詢和更新的資料庫與 executor 怎麼排 system、`Cargo.lock` 鎖版與 agent 規則檔、貪吃蛇會碰到的概念、macOS 建置步驟 0–13（2026-11-16 部分在 Mac 上實跑）、為什麼要裝 Command Line Tools（編譯與連結是兩步、`cc` 只是啟動 `ld` 的入口、`ld` 與 `dyld` 分屬建置期與執行期、繞不過去的是 SDK）、Rust toolchain 與編譯流程（cargo、rustc、linker 三個 process 接力、HIR / MIR / LLVM IR 逐層改寫、`cargo check` 只跑前端、LLVM 把 N × M 變 N + M、object file 與 linker 四步）、建置模型（crate 是編譯單位而非產物、發佈原始碼而非二進位、feature 是編譯期開關、Rust ABI 與 C ABI、`crate-type` 與靜態／動態連結、建置快取與兩種設定檔，含 Mac 上的實測）、`cargo run` 到第一幀的時間軸 | 想獨立做一款遊戲，第一步選引擎就卡住：引擎到底是什麼、該挑哪個、code agent 都能寫程式了還有沒有差 | note 03 引擎與 GPU 鏈、note 04 §4 多讀 XOR 單寫、經驗 01 §3–§5 / §7、note 05 §13 Mach；藍圖 ① ② | 2026-11-13 → 2026-11-16 |
+| 編號 | 主題 | 起因 | 接在哪裡 |
+|---|---|---|---|
+| [01](experiences/01-libc-abi-alpine.md) | libc 住哪一層、API vs ABI vs ISA、target triple 的五層檢查、Linux 唯一穩定的 syscall ABI、動態載入器與 `dlopen`、依賴的四種與靜態連結消掉哪一種 | Debian 上編的 Rust binary 丟進 Alpine 容器，`sh: not found` | note 04 ELF 段的下半段、note 05 exec 換映像；藍圖 ②、模式 4 / 6 |
+| [02](experiences/02-ssh-agent-sandbox-socket-proxy.md) | SSH 認證的三關（網路 / 設定檔 / 簽名）、ssh-agent 把 key 關在記憶體與 keychain 三種壽命、unix socket 的 `connect` 走 `namei` 所以 MAC 比對解析後路徑（symlink 與 glob 都不算）、launchd 隨機 socket 與 `/var/run` `/private` 的意義、sandbox 單一 proxy 出口與 `ProxyCommand` CONNECT 隧道、kernel 層 vs harness 分類器；續：agent 是簽名代辦不是 proxy、一把 key 的四樣東西（公鑰 / 私鑰檔 / passphrase / 解開的 key）、終端機兩條路 vs sandbox 一條路、key 回到 agent 的三條路與鑰匙圈項目、passphrase 加密的是檔案內容不是讀取權限、`IdentitiesOnly` 在 sandbox 內的坑、config 的 `Host` 段與 `Match` 段分工 | 想在 Claude Code sandbox 內直接 `git push`：`~/.gitconfig` 不可讀 → `Could not resolve hostname` → `Error connecting to agent`；三天後重開機，sandbox 內 `Permission denied (publickey)` 而終端機正常 | note 05 §3 filter、§8 `namei → MAC hook`、§9 兩層；藍圖 ③ ④ ⑤ |
+| [03](experiences/03-game-engine-ecs-bevy.md) | 遊戲引擎 = runtime + 工具鏈（main loop 屬於引擎、編輯器跑在哪與遊戲輸出到哪是兩回事）、引擎一覽與費用、選引擎的三個變數與 agent 友善度、Bevy 現況（沒有編輯器、UI 年輕、各平台支援到哪）、ECS 是每幀被查詢和更新的資料庫與 executor 怎麼排 system、`Cargo.lock` 鎖版與 agent 規則檔、貪吃蛇會碰到的概念、macOS 建置步驟 0–13（部分在 Mac 上實跑）、為什麼要裝 Command Line Tools（編譯與連結是兩步、`cc` 只是啟動 `ld` 的入口、`ld` 與 `dyld` 分屬建置期與執行期、繞不過去的是 SDK）、Rust toolchain 與編譯流程（cargo、rustc、linker 三個 process 接力、HIR / MIR / LLVM IR 逐層改寫、`cargo check` 只跑前端、LLVM 把 N × M 變 N + M、object file 與 linker 四步）、建置模型（crate 是編譯單位而非產物、發佈原始碼而非二進位、feature 是編譯期開關、Rust ABI 與 C ABI、`crate-type` 與靜態／動態連結、建置快取與兩種設定檔，含 Mac 上的實測）、`cargo run` 到第一幀的時間軸 | 想獨立做一款遊戲，第一步選引擎就卡住：引擎到底是什麼、該挑哪個、code agent 都能寫程式了還有沒有差 | note 03 引擎與 GPU 鏈、note 04 §4 多讀 XOR 單寫、經驗 01 §3–§5 / §7、note 05 §13 Mach；藍圖 ① ② |
 
 ## 階段路線圖
 
