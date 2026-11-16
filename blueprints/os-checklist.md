@@ -2,7 +2,7 @@
 
 > [`os.md`](os.md) 是地圖，這份是進度表：六個子系統各挖到哪裡、下一條線挖什麼、還有哪些題沒答。
 > 每份 note 或經驗入庫後回來做三件事：覆蓋表「已挖到」補 note 編號、把對應項目從「還沒碰」移走；待挖路線打勾並記 note 編號；未答的題有答案的打勾並註記出處。
-> 建立日期：2026-11-05｜最近更新：2026-11-13
+> 建立日期：2026-11-05｜最近更新：2026-11-16
 
 ---
 
@@ -10,8 +10,8 @@
 
 | 子系統 | 已挖到 | 還沒碰的核心 |
 |---|---|---|
-| ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11）；一個 process 裡 main thread 跑 loop、executor 把讀寫不衝突的 system 丟到 worker thread、另有 Render thread（經驗 03 §7、§11；§11 是骨架，未逐條走過） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
-| ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§11 t5–t7；骨架，未逐條走過）；編譯與連結是兩步、目的檔的空格由 `ld` 照符號名字填、`ld`（建置期）與 `dyld`（執行期）的分工、Rust crate 之間靜態而系統函式庫動態（經驗 03 §10 步驟 1「為什麼要裝它」） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
+| ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11）；一個 process 裡 main thread 跑 loop、executor 把讀寫不衝突的 system 丟到 worker thread、另有 Render thread（經驗 03 §7、§13；§13 是骨架，未逐條走過）；`cargo run` 是 shell → cargo → rustc → cc / ld 一路 fork+exec 的 process 接力，LLVM 以函式庫的形式住在 rustc process 裡（經驗 03 §11.1、§11.8） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
+| ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§13 t5–t7；骨架，未逐條走過）；編譯與連結是兩步、目的檔的空格由 `ld` 照符號名字填、`ld`（建置期）與 `dyld`（執行期）的分工、Rust crate 之間靜態而系統函式庫動態（經驗 03 §10 步驟 1「為什麼要裝它」）；object file 的四個區塊與 linker 四步：收集、符號解析、排位址、relocation（經驗 03 §11.6）；`crate-type` 四種產物、靜態與動態各把機械碼放在哪、開 `dynamic_linking` 後 Bevy 與 `std` 兩條邊變成動態、只有 `@rpath` 而沒有 `LC_RPATH` 時 dyld 的失敗訊息（經驗 03 §12.5，含 Mac 實測） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
 | ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
 | ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4）；跨 VM 管線：9P over hvsocket、AF_VSOCK ↔ AF_HYPERV、binfmt_misc 把 `.exe` 交給 interop（06 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
 | ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；passphrase 是檔案內容的加密、與 DAC / MAC 的「讀不讀得到」分屬兩層，agent 的信任邊界與鑰匙圈（經驗 02 §3.5–§3.7）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
@@ -105,12 +105,16 @@
 - [ ] FreeBSD 的 Linux 相容層補的是 ③，那 ④⑤ 的 `ld-linux` 和 `libc.so.6` 從哪來？跟 WSL1 是同一種做法嗎？
 - [ ] 2024 Ubuntu 編的 Rust binary（gnu target）放 2020 Ubuntu 死在 ⑤。不換 target、不改機器，只改 build 設定能不能過？（提示：⑤ 錯誤訊息裡的版本號是誰決定的。）
 - [ ] Linux 和 macOS 都是 x86-64、System V 呼叫慣例，把 Linux 的 `.o` 拿去 macOS 連結，差在哪一層？（提示：符號名前的底線、note 04 的 section 名。）
-- [ ] Rust 沒有穩定 ABI，但 `std` 是預編好的。矛盾嗎？cargo 靠什麼保證你的 crate 和預編的 `std` 擺法一致？
+- [ ] Rust 沒有穩定 ABI，但 `std` 是預編好的。矛盾嗎？cargo 靠什麼保證你的 crate 和預編的 `std` 擺法一致？ → 經驗 03 §12.4 有一句說明（`std` 和 `rustc` 在同一個 toolchain 一起發），待 /校正
 - [ ] 假設 glibc 改了 `struct stat` 欄位順序，但 syscall 號碼、符號名、版本標籤都沒動。舊 binary 能啟動嗎？何時出事、長什麼樣？「有標籤的檢查」保護了多少？
 
-**遊戲引擎 / Bevy**（經驗 03 留下；兩題都是依機制推的，待在 Mac 上實跑）
+**遊戲引擎 / Bevy 與建置**（經驗 03 留下；2026-11-16 實跑後補上觀察到的部分，答案待 /校正）
 
-- [ ] 第一次 `cargo run` 跑起來，terminal 那行 `AdapterInfo { ... }` 的 backend 是不是 Metal？是哪個 crate 印的、在時間軸的哪一步？（經驗 03 §10 步驟 9 推論、§11 t10）
-- [ ] 帶 `dynamic_linking` 編出來的 `./target/debug/snake` 不經 `cargo run` 直接執行，是不是報 dyld 找不到 `libbevy_dylib`？`cargo run` 替它多設了什麼、發佈時為什麼要拿掉這個 feature？（經驗 03 §10 排錯表推論、§11 t5）
-- [ ] Bevy 開了 `dynamic_linking` 之後，「Rust crate 之間靜態、系統函式庫動態」那張圖的哪一條線從靜態變成動態？（經驗 03 §10 步驟 1、步驟 9）
+- [ ] 第一次 `cargo run` 跑起來，terminal 那行 `AdapterInfo { ... }` 的 backend 是不是 Metal？是哪個 crate 印的、在時間軸的哪一步？（經驗 03 §10 步驟 9 推論、§13 t10）
+- [ ] 帶 `dynamic_linking` 編出來的 `./target/debug/snake` 不經 `cargo run` 直接執行，是不是報 dyld 找不到 `libbevy_dylib`？`cargo run` 替它多設了什麼、發佈時為什麼要拿掉這個 feature？（經驗 03 §10 排錯表推論、§13 t5） → 2026-11-16 實測：會失敗，但報的是 `@rpath/libstd-<hash>.dylib`、`no LC_RPATH's found`，不是 `libbevy_dylib`（經驗 03 §12.5、陷阱 41）；後兩問待 /校正
+- [ ] Bevy 開了 `dynamic_linking` 之後，「Rust crate 之間靜態、系統函式庫動態」那張圖的哪一條線從靜態變成動態？（經驗 03 §10 步驟 1、步驟 9） → 2026-11-16 實測：兩條，「自己的 crate ↔ Bevy」和「↔ Rust `std`」（`otool -L`，經驗 03 §12.5）；`std` 為什麼跟著變，待 /校正
 - [ ] 一個 `main` 是空的、完全沒用到 `println!` 的 Rust 程式，在 macOS 上還需要 dyld 嗎？（經驗 03 §10 步驟 1）
+- [ ] `Cargo.lock` 裡整份搜不到 `bevy_dylib`，`bevy` 的相依也只列 `bevy_internal`；但開 `dynamic_linking` 時 `target/` 裡編了 `bevy_dylib-0.20.1`，cargo 的 fingerprint 也記著 `bevy` 相依它。lock 為什麼沒有這個 package？（經驗 03 §12.3 實測留下）
+- [ ] 開了 `dynamic_linking`，執行檔和 `libbevy_dylib` 都指向同一個 `libstd-<hash>.dylib`。如果執行檔把 `std` 靜態連進去會出什麼事？`rustc` 靠哪條規則擋掉？（經驗 03 §12.5 的機制說明）
+- [ ] 執行檔記 `libbevy_dylib` 用絕對路徑、記 `libstd` 用 `@rpath`，這兩種寫法各是誰決定的？把整個專案資料夾搬到別的位置，哪一個先壞？（經驗 03 §12.5）
+- [ ] Unix 上 `cargo run` 最後是 fork+exec 還是直接 exec 換映像？遊戲跑起來時 process tree 上還有沒有 cargo？（經驗 03 §11.8 t14 與 §13 t5 寫法不一致）
