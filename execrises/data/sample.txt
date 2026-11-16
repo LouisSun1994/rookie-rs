@@ -1,0 +1,5 @@
+The crab walks sideways because the crab has no reason to walk straight.
+The borrow checker is not your enemy; the borrow checker is your first reviewer.
+A value has one owner, and when the owner goes away the value goes away.
+You can lend a value to many readers or to one writer, but not both.
+The compiler is strict so that the program at runtime does not have to be.

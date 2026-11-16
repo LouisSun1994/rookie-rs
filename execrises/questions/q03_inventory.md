@@ -1,0 +1,70 @@
+# q03：玩家背包
+
+檔案：[`src/bin/q03_inventory.rs`](../src/bin/q03_inventory.rs)
+
+## 背景
+
+用 `struct` 把資料綁在一起，用 `impl` 掛上方法。方法的第一個參數有三種：
+`&self`（借來看）、`&mut self`（借來改）、`self`（整個拿走）。這題三種都會用到。
+
+## 資料
+
+```rust
+struct Item {
+    name: String,
+    weight: u32,
+    value: u32,
+}
+
+struct Player {
+    name: String,
+    hp: u32,
+    capacity: u32, // 背包最多能裝的總重量
+    bag: Vec<Item>,
+}
+```
+
+## 要做的事
+
+1. `Player::new(name: &str, capacity: u32) -> Player`：`hp` 設 100，背包是空的。
+2. `fn total_weight(&self) -> u32`：背包目前的總重量。
+3. `fn pick_up(&mut self, item: Item) -> bool`：放進去之後不超過 `capacity` 就放進背包並回傳 `true`，否則不放、回傳 `false`。
+4. `fn most_valuable(&self) -> Option<&Item>`：回傳 `value` 最高的物品；背包是空的就回傳 `None`。
+5. `fn drop_all(self) -> Vec<Item>`：玩家消失，把整個背包交出來。
+6. `main` 建立 `capacity` 為 10 的玩家，依序撿下面四樣，印出每次的結果：
+
+   | 物品 | weight | value | 預期 |
+   |---|---|---|---|
+   | sword | 4 | 50 | `true` |
+   | shield | 5 | 30 | `true` |
+   | anvil | 20 | 5 | `false` |
+   | potion | 1 | 80 | `true` |
+
+   接著印出：`total_weight()` 是 `10`、`most_valuable()` 是 `potion`、`drop_all()` 回傳的 `Vec` 長度是 `3`。
+
+## 限制
+
+- `total_weight` 和 `most_valuable` 用 `for` 加一個自己維護的變數來做，不要用 `.sum()`、`.max_by_key()` 等 iterator 方法
+- 不准出現 `.clone()`
+- 可以用 `#[derive(Debug)]` 方便印出
+
+## 實驗
+
+每個都先預測，再試。
+
+- A. 把 `let mut p = Player::new(…)` 的 `mut` 拿掉，再呼叫 `pick_up`
+- B. 在 `drop_all()` 之後呼叫 `p.total_weight()`
+- C. 印出 `std::mem::size_of::<Item>()` 和 `std::mem::size_of::<Player>()`。先算出你預測的數字
+- D. 幫 `Item` 實作 `Drop`，內容只做一件事：印出 `drop: {name}`。觀察 anvil 那一行出現在輸出的哪個位置，以及程式結束前其他物品的順序
+
+## 在註解裡回答（先寫預測，再跑）
+
+1. 實驗 C 你預測幾 bytes、實際幾 bytes？背包多放十個物品，`size_of::<Player>()` 會變嗎？為什麼？
+2. 撿完 sword 和 shield 的那一刻，畫出 stack 和 heap 的配置圖。heap 上總共有幾塊？每一塊的擁有者是誰？
+3. anvil 被拒絕之後，它的 `name` 佔的那塊 heap 是在哪一行程式碼的位置被釋放的？釋放的程式碼是誰寫的、誰放進去的、哪條 thread 執行的？
+4. `most_valuable` 回傳 `Option<&Item>`。如果改成回傳 `Option<Item>`，函式內容必須怎麼改？呼叫完之後背包會變成什麼樣？
+5. `drop_all(self)` 的 `self` 不是 `&self`。呼叫的那一刻，`p` 的哪些部分被搬走、哪些被釋放？
+
+## 交卷
+
+commit 之後說「複盤 q03」。
