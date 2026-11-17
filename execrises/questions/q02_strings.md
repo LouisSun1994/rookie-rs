@@ -35,18 +35,64 @@
 
 ## 實驗
 
-每個都先預測「編不編得過」，再試。試完把那幾行註解掉，留在檔案裡。
+四個實驗都是「在 `main` 裡暫時加幾行程式，看編譯器或執行結果怎麼反應」。
 
-- A. `shout(name)` 之後再 `println!("{name}")`
-- B. 依序寫這三行：`let w = first_word(&name);` → `append_bang(&mut name);` → `println!("{w}");`
-- C. 把 B 的第三行拿掉，只留前兩行
-- D. `let copy = name.clone();`，印 `copy.as_ptr()`，和 `name.as_ptr()` 比較
+做法：先在註解寫下預測 → 加上那幾行 → 編譯或執行 → 記錄結果 → 把那幾行註解掉留在檔案裡，再做下一個。
+
+### 實驗 A：字串交給 `shout` 之後，還能不能用
+
+加在 `main` 的最後面（`shout(name)` 之後）：
+
+```rust
+let loud = shout(name);   // 這行是原本就有的
+println!("{name}");       // ← 加這一行
+```
+
+預測：編不編得過？
+
+### 實驗 B：借出去看的同時，拿去改
+
+加在 `shout(name)` **之前**（這時 `name` 還在）：
+
+```rust
+let w = first_word(&name);   // w 借用了 name 的一部分
+append_bang(&mut name);      // 修改 name
+println!("{w}");             // 修改之後，還在使用 w
+```
+
+預測：編不編得過？
+
+### 實驗 C：和 B 一樣，但修改之後不再使用 `w`
+
+把實驗 B 的第三行刪掉，只留前兩行：
+
+```rust
+let w = first_word(&name);   // w 借用了 name 的一部分
+append_bang(&mut name);      // 修改 name
+                             // 之後沒有任何地方用到 w
+```
+
+預測：編不編得過？結果和 B 一樣嗎？
+
+（編譯器可能會警告 `w` 沒被使用，那是警告不是錯誤，不影響這個實驗。）
+
+### 實驗 D：`.clone()` 到底做了什麼
+
+加在 `shout(name)` **之前**：
+
+```rust
+let copy = name.clone();
+println!("name: {:p}", name.as_ptr());
+println!("copy: {:p}", copy.as_ptr());
+```
+
+預測：兩個位址相同還是不同？
 
 ## 在註解裡回答（先寫預測，再跑）
 
 1. 第 6 步印出的位址，哪些相同、哪些不同？`&str`、`&mut String`、`String` 三種傳法，各自讓 heap 上的字元被複製了幾次？
 2. 實驗 B：假設編譯器放行，執行期可能出什麼事？（提示：`push` 在容量不夠時會做什麼、`w` 指向哪裡）
-3. 實驗 B 編不過、C 卻編得過。差別只有一行 `println!`，編譯器判斷的依據是什麼？
+3. 實驗 B 和 C 只差一行 `println!`。兩者的結果相同嗎？如果不同，編譯器判斷的依據是什麼？
 4. `first_word("no_space")` 傳進去的是字串常值。它的字元住在哪裡（stack / heap / 其他）？誰負責釋放、什麼時候？
 5. `&name` 的型別是 `&String`，為什麼能傳給要 `&str` 的函式？
 
