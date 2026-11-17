@@ -52,6 +52,8 @@
 
 ## 2. 記憶體模型：call by value、move、Copy
 
+> 完整模型在第 4 節：同一張傳參表，從「照抄值自己的 byte + 型別有沒有 `Copy`」重新推一次，並補上 clone 與 borrow。
+
 ### 傳參三種方式（全部在呼叫處明確寫出）
 | 參數型別 | 呼叫 | 語意 | 呼叫後原變數 |
 |---|---|---|---|
@@ -75,6 +77,8 @@
 
 ## 3. Stack 與 Heap
 
+> 「必須放 heap 的根本原因」那一條的方向，第 4 節修正過：大小固定只是放 stack 的資格；值會在 heap，是因為 `String` 這類型別的程式碼呼叫了 allocator，不是 rustc 看大小替你決定。
+
 - 每個函式呼叫開一個 stack frame，區域變數住在裡面，`main` 無特殊待遇
 - **Rust 從不偷偷把東西放 heap**：只有 `String`、`Vec`、`Box`、`HashMap`、`Rc`、`Arc` 等型別會配置 heap，且它們的 handle 仍在 stack
 - 同一個 `i32` 可以在 stack（`let x = 5`）、heap（`vec![5]` 的內容、`Box::new(5)`）
@@ -94,7 +98,241 @@
 
 ---
 
-## 4. Rc / Arc / Send / Sync / 'static
+## 4. Copy / move / clone / borrow
+
+> 回頭補的一節。第 2、3 節是最初的概覽；這裡把同一件事從「機器只照抄值自己的 byte」這一條規則重新推一次，並修正那兩節留下的幾個方向（見本節的陷阱清單）。標 **補強** 的 blockquote 是整理進 repo 時加註的，不在原本這條線的對話裡。
+
+### 一句話版本
+
+以值使用任何東西，機器都只照抄「值自己的 byte」。抄完之後原變數還能不能用，由型別有沒有實作 `Copy` 決定。borrow 是同一條規則套在「位址」這種值上。`clone` 是唯一會去複製「指向的內容」的動作。
+
+### 分層
+
+| 層 | 問的問題 | 答案 |
+|---|---|---|
+| 機器 | 傳遞時實際做什麼 | 一律照抄值自己的 byte |
+| rustc | 抄完原變數還能用嗎 | 型別是 `Copy`：能。不是：失效（move） |
+| rustc | 傳的是位址時 | 擁有權不變，另外檢查 lifetime 與讀寫規則（borrow） |
+| std | `clone()` 做什麼 | 一個 method，行為由型別作者決定 |
+
+Rust 沒有 call by reference 這種獨立機制。參考本身就是一個值，傳參考就是傳值。
+
+### 值自己的 byte 與指向的內容
+
+**核心規則**：一個值是一塊固定大小的 byte。這一塊裡如果有指標，指向的是另外一塊。move 和 `Copy` 只抄前者，`clone` 才會碰後者。
+
+```
+原本
+a [ptr | 2 | 2] ──► heap P: h i
+
+let b = a;            move
+a （失效）
+b [ptr | 2 | 2] ──► heap P: h i      同一塊，沒有新配置
+
+let b = a.clone();    clone
+a [ptr | 2 | 2] ──► heap P: h i
+b [ptr | 2 | 2] ──► heap Q: h i      新配置一塊，內容複製過去
+
+let b = &a;           borrow
+a [ptr | 2 | 2] ──► heap P: h i
+b [ptr] ──► 指向 a
+```
+
+| 動作 | 寫法 | 抄了什麼 | 新的 heap 配置 | 擁有者 | 原變數之後 |
+|---|---|---|---|---|---|
+| 以值傳，型別是 `Copy` | `f(x)` | 值自己的 byte | 0 | 各自獨立 | 能用 |
+| move | `f(s)` | 值自己的 byte（`String` 是 24） | 0 | 1，換人 | 永久失效，除非重新賦值 |
+| borrow | `f(&s)` | 8 byte 位址（`&str` 是 16） | 0 | 1，沒變 | 借用結束後能用 |
+| clone | `f(s.clone())` | 值自己的 byte + 內容 | 依型別，`String` 是 1 | 2，各擁有一塊 | 能用 |
+
+**關鍵細節**
+
+- move 不是「沒有複製」，是「複製了，而且 rustc 不准再碰原本那份」。「標記失效」純編譯期，執行檔裡沒有對應的指令。
+- move 之後釋放只發生一次，在新擁有者離開作用域時。原變數不會被釋放，也不會自己恢復。
+- move 抄的 byte 裡有沒有位址要看型別：`String` 有、`Box<T>` 整個就是、沒加 `Copy` 的 `struct P { x: i32 }` 沒有。
+- borrow 期間原變數受限是暫時的：被 `&` 借出時能讀不能改，被 `&mut` 借出時完全不能碰，借用結束全部恢復。
+- `clone` 不一定貴：`String`、`Vec` 是深複製；`Copy` 型別的 clone 就是照抄；`Rc`、`Arc` 的 clone 只把計數加一。
+
+> **補強**：「標記失效純編譯期」有一個例外。變數只在某些分支被 move（`if cond { take(s); }`）時，rustc 在編譯期無法確定作用域結束時 `s` 還在不在，會在 stack 上多放一個隱藏的布林（drop flag），執行期照它決定要不要 drop。「之後能不能再用 `s`」仍然是編譯期判定；執行期多出來的只有「要不要釋放」這一個檢查。
+
+### `Copy` 是什麼
+
+**核心規則**：`Copy` 是一個沒有任何 method 的 trait，是貼在**型別**上的標籤，只回答「照抄之後原本那份還安不安全」。預設是 move，`Copy` 要作者主動宣告。
+
+```rust
+pub trait Copy: Clone { }      // std 裡的定義，大括號是空的
+
+#[derive(Clone, Copy)]         // Copy 要求先有 Clone
+struct Point { x: i32, y: i32 }
+```
+
+```
+rustc 看到 let b = a;
+  → 查 a 的型別 T 有沒有 impl Copy
+      有   → a 維持可用
+      沒有 → 在 MIR 上把 a 標記為「已移出」，之後再用就報 E0382
+```
+
+能不能 `Copy` 的判斷標準是「**有沒有擁有需要釋放的東西**」，不是「有沒有用到 heap」：
+
+| 型別 | 跟 heap 有關嗎 | 擁有要釋放的東西嗎 | `Copy` |
+|---|---|---|---|
+| `i32`、`bool`、`char`、`f64` | 無 | 無 | 是 |
+| `&T`、`&str`（即使指向 heap） | 可能指向 heap | 沒有，只是借 | 是 |
+| `&mut T` | | 沒有，但必須獨佔 | 不是 |
+| `String`、`Vec`、`Box` | 內容在 heap | 有 | 不是 |
+| `File` | 無 | 有，要關檔 | 不是 |
+| `[T; N]`、`(A, B)` | | 看內容 | 內容全是 `Copy` 才是 |
+| 自訂 struct | | | 預設不是；欄位全是 `Copy` 且有 derive 才是 |
+
+**關鍵細節**
+
+- 為什麼不是 `Copy` 就得 move：照抄 `String` 的 24 byte 會得到兩個指向同一塊 heap 的擁有者，離開作用域時釋放兩次（double free），或一方搬家後另一方指向已釋放的記憶體。
+- 加 `Copy` 的兩個條件：所有欄位都是 `Copy`，而且型別沒有實作 `Drop`。不符合會報 E0204。
+- 自訂 struct 即使沒有需要釋放的欄位，也可以不加 `Copy`，那它就是 move。
+- 自己寫一個叫 `copy` 的 method 沒有任何效果，rustc 只認 trait。
+- 預設 move 的理由：忘了宣告頂多不方便；而且 `Copy` 是對使用者的承諾，日後加一個 `String` 欄位就得收回。
+
+> **補強**：兩個條件對應兩個不同的錯誤碼。欄位不是 `Copy` 報 E0204；型別實作了 `Drop` 報的是 E0184（`rustc --explain E0184`）。
+
+| | `Copy` | `Clone` |
+|---|---|---|
+| 有 method 嗎 | 沒有 | `fn clone(&self) -> Self` |
+| 複製由誰執行 | rustc 產生的照抄 byte | 型別作者寫的程式碼 |
+| 怎麼觸發 | 自動，以值使用時 | 明確寫 `.clone()` |
+| 能做什麼 | 只能原樣照抄 | 任何事，例如配置新的 heap |
+
+### 位置與 `Copy` 是兩個獨立的問題
+
+**核心規則**
+
+| 問題 | 由什麼決定 |
+|---|---|
+| 這個值現在在哪 | 你怎麼放它 |
+| 這個值能不能 `Copy` | 它的型別 |
+
+| 怎麼建立 | 值本體在哪 | 對大小的要求 |
+|---|---|---|
+| 字面值、`static` | 執行檔唯讀區 | 編譯期就要知道內容 |
+| `let` 區域變數 | stack | 必須大小固定 |
+| `Box::new(..)`、`v.push(..)` | heap | 不限 |
+
+**關鍵細節**
+
+- rustc 從不自動配置 heap。會配置的只有 `String`、`Vec`、`Box` 這類型別的程式碼去呼叫 allocator。
+- 大小固定是放 stack 的必要條件，不是原因。
+- `str`、`[T]` 這類不定大小型別不能當區域變數（`let ss = *s;` 會錯），只能躲在帶長度的指標後面用。
+- `&X` 指向 X 所在的位置：`&Box<T>` 指向 `Box` 變數本身（通常在 stack），`&*b` 才指到 heap。
+- 同一個 `&str` 型別可以指向執行檔、heap 或 stack，型別不告訴你 byte 在哪。
+- `Copy` 的來源和目的地在哪都可以；複製出來的那一份在**目的地**：
+
+| 寫法 | 目的地 | 那一份在哪 |
+|---|---|---|
+| `let b = a;` | 區域變數 | stack |
+| `f(a)` | `f` 的參數 | stack，`f` 的 frame |
+| `v.push(a)`、`v[0] = a;` | `Vec` 的格子 | heap |
+| `*boxed = a;`、`Box::new(a)` | `Box` 指向的那塊 | heap |
+| `let b = v[0];` | 區域變數 | stack |
+
+struct 的佈局：所有欄位自己的 byte 都排在 struct 本體那一塊裡；`String` 欄位在本體裡佔 24 byte，內容永遠在另一塊，不管本體在哪。
+
+```
+let a = Player { .. };
+stack                               heap
+a [hp | name: ptr,len,cap] ───────► F e r r i s
+
+Vec<Player> 裝兩個
+stack
+v [ptr | len 2 | cap 2]
+   │
+   ▼ heap 區塊 A：Vec 的緩衝區，連續
+   [hp | ptr,len,cap][hp | ptr,len,cap]
+          │                 │
+          ▼ heap 區塊 B     ▼ heap 區塊 C
+          F e r r i s       C o r r o
+```
+
+- `size_of::<Player>()` 固定是 32，跟名字多長無關。
+- 不能做成一整塊連續的原因：`Vec` 靠「每個元素一樣大」算位置，而且名字要能變長。
+- 釋放由內而外：每個 `name` 先釋放自己那塊，最後 `Vec` 釋放緩衝區。
+
+### stack frame 與複製次數
+
+**核心規則**：stack frame 的大小是 rustc 在編譯期算好的（所有區域變數的總和），進入函式時一次保留。函式內所有的 `let`、複製、move 都只是往這塊已保留的空間寫值。
+
+**關鍵細節**
+
+- stack 用量由「有幾個變數、各多大」決定，不由「複製了幾次」決定。迴圈裡的 `let b = a;` 跑一百萬次，都是寫進同一格。
+- copy 與 move 在 stack 用量上沒有差別。
+- 會 stack overflow 的只有兩種：呼叫層數太深、單一區域變數太大。
+- `Copy` 不保證便宜：`[u8; 4096]` 可以是 `Copy`，但每次以值傳遞都悄悄抄 4 KB，耗的是 CPU 時間。
+
+### 怎麼選
+
+| 函式要做的事 | 參數型別 |
+|---|---|
+| 只是讀 | `&T` |
+| 要修改，呼叫端之後還要用 | `&mut T` |
+| 要把值存起來、帶走或消耗掉 | `T`（交出擁有權） |
+| 值很小又單純（數字、座標） | `T`，靠 `Copy` |
+
+- 預設先借。函式真的需要擁有才收 `T`。確實需要第二份才 `.clone()`。
+- 自己的型別：小而純的資料（座標、顏色、ID、狀態列舉）加 `Copy`，其他不加。
+- 不要問「move 好還是 copy 好」，那是型別決定的。要問的是「這個函式需不需要擁有它」。
+
+### 思維鏈：一個 `String` 走過 move、borrow、clone、drop
+
+```rust
+fn look(s: &String) {}
+fn take(s: String) {}
+
+fn main() {
+    let a = String::from("hi");   // t0
+    let b = a;                    // t1
+    look(&b);                     // t2
+    let c = b.clone();            // t3
+    take(b);                      // t4、t5
+}                                 // t6
+```
+
+```
+時間  動作              照抄的 byte          heap                  擁有者
+t0   String::from      從執行檔複製 2 byte   配置 P                a 擁有 P
+t1   let b = a         24 byte              不動                  b 擁有 P，a 失效
+t2   look(&b)          8 byte 位址          不動                  b 擁有 P（沒變）
+     look 結束                               不釋放
+t3   b.clone()         24 byte + 2 byte     配置 Q                b 擁有 P，c 擁有 Q
+t4   take(b)           24 byte 到 take 的 frame  不動             s 擁有 P，b 失效
+t5   take 結束                               釋放 P                s 離開作用域
+t6   main 結束                               釋放 Q                c 離開作用域
+                                                                  a、b 已失效，什麼都不做
+
+合計：配置 2 次、釋放 2 次；"hi" 最多同時存在 3 份（執行檔、P、Q）。
+```
+
+### 陷阱清單
+
+1. ❌ 編譯器不知道大小的東西會被放到 heap → ✅ rustc 從不自動配置 heap，不定大小的型別只准透過帶長度的指標使用 → 為什麼：配置必須在程式碼裡看得見，放進 heap 一定是有人呼叫了 allocator。
+2. ❌ `String` 在 heap 是因為動態大小、陣列在 stack 是因為大小固定 → ✅ 位置看「怎麼建立的」：`String::from` 呼叫了 allocator、`let buf` 是區域變數 → 為什麼：大小固定只是放 stack 的資格，`Box::new([1, 2])` 就把固定大小的東西放進 heap。
+3. ❌ 把值傳給別的函式，它就會離開 stack → ✅ 傳值只是在對方的 stack frame 再放一份 → 為什麼：函式呼叫只動 stack，會動 heap 的只有 allocator。
+4. ❌ 陣列能複製、`String` 不能，是因為 stack 能抄、heap 不能抄 → ✅ 機器動作相同，都是照抄值自己的 byte；差在抄完會不會出現兩個擁有者 → 為什麼：`String` 的 24 byte 只是指標，照抄會讓兩個變數都去釋放同一塊 heap。
+5. ❌ copy 還是 move，看是不是基本型別 → ✅ 看型別有沒有實作 `Copy` → 為什麼：`&mut T`、`[String; 2]` 是基本型別卻不是 `Copy`；自訂 struct 加了 derive 就是 `Copy`。
+6. ❌ move 之後原變數等釋放完就能再用 → ✅ 原變數永久失效，只有重新賦值才能再用；釋放由新擁有者做一次 → 為什麼：原變數不擁有任何東西了，也不會被 drop。
+7. ❌ move 是 heap 上的權力轉移 → ✅ 任何不是 `Copy` 的型別以值使用都是 move，沒用到 heap 的 struct 也一樣 → 為什麼：擁有權管的不只記憶體，還有檔案、鎖、連線。
+8. ❌ `Copy` 是一個 method，自己寫一個 copy method 就能避開 move → ✅ `Copy` 是空的 trait 標籤，rustc 只認這個標籤 → 為什麼：複製動作是 rustc 產生的，作者無法自訂，否則到處都是隱藏的程式碼在跑。
+9. ❌ 欄位不能 `Copy` 是因為它用到 heap → ✅ 是因為它擁有需要釋放的東西 → 為什麼：`&str` 指向 heap 卻是 `Copy`，`File` 沒用 heap 卻不是。
+10. ❌ move 等於 borrow；或 borrow 是傳址、move 是傳值 → ✅ 兩者相反：move 交出擁有權，borrow 不變。傳值包含 `Copy` 與 move 兩種結果，borrow 則是把位址這個值傳過去 → 為什麼：borrow 之後由原擁有者釋放，move 之後由新擁有者釋放。
+11. ❌ `&Box<T>` 指向 heap → ✅ `&X` 指向 X 所在的位置，`Box` 變數通常在 stack → 為什麼：`&` 不管 X 裡面又指向哪裡。
+12. ❌ struct 本體都在 stack，member 再看型別決定放哪；放進 heap 容器後就變成一整塊連續 → ✅ 欄位永遠排在本體那一塊裡，本體在哪看你怎麼放；`String` 欄位的內容永遠是另外一塊 → 為什麼：值的大小必須固定，容器才能算出第 i 個元素的位置。
+13. ❌ 在 heap 裡的 struct 不能 `Copy`，`Copy` 是 stack 情境專用 → ✅ `Copy` 是型別的性質，跟值在哪無關 → 為什麼：照抄一塊固定大小的 byte，來源和目的地在哪都可以。
+14. ❌ 複製是賦值才發生，所以複製出來的一定在 stack → ✅ 那一份在目的地；`v[0] = a`、`*boxed = a` 的目的地在 heap → 為什麼：任何以值使用的地方都會複製，不只 `let`。
+15. ❌ move 等於 clone，或 move 傳的一定是位址 → ✅ move 只抄值自己的 byte，heap 內容不動；clone 才配置新的一塊 → 為什麼：1 GB 的 `String` move 只抄 24 byte。
+16. ❌ 一直 copy 會 stack overflow → ✅ stack frame 編譯期就固定，重複複製只是往同一格寫 → 為什麼：overflow 來自呼叫太深或單一區域變數太大。
+17. ❌ clone 一定是最吃資源的 → ✅ 看型別：`String` 深複製，`Rc` 只加計數 → 為什麼：`clone` 是作者寫的 method，不是固定動作。
+
+---
+
+## 5. Rc / Arc / Send / Sync / 'static
 
 ### Arc（Atomically Reference Counted）
 - 解決：多個 task/執行緒要共享同一份資料，編譯期無法決定誰最後結束 → 執行期計數
@@ -130,7 +368,7 @@
 
 ---
 
-## 5. Closure 與 move
+## 6. Closure 與 move
 
 - `|x| x + 1`：`|...|` 是參數列表，不是 or；`||` 代表無參數
 - 可捕獲外部變數（`fn` 不行）；編譯器自動選最溫和的捕獲：只讀 → `&`、修改 → `&mut`、消耗 → 取走所有權
@@ -142,7 +380,7 @@
 
 ---
 
-## 6. async / Future / Waker
+## 7. async / Future / Waker
 
 ### Future
 - `trait Future { type Output; fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Output>; }`
@@ -206,7 +444,7 @@
 
 ---
 
-## 7. Tokio runtime 結構
+## 8. Tokio runtime 結構
 
 - `#[tokio::main]` 展開為 `Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {...})`
 - 三群執行緒：**main thread**（1 條，只 `block_on` 推動 main Future，不參與 work stealing）、**worker**（預設 = 邏輯 CPU 數，啟動時建好，各有本地佇列 + 全域佇列 + work stealing）、**blocking pool**（獨立，不從 worker 撥）
@@ -225,7 +463,7 @@
 
 ---
 
-## 8. 作業系統層
+## 9. 作業系統層
 
 ### process 與 thread
 - process = **資源容器**（獨立記憶體空間、fd 表、權限），動態向 kernel 要資源，kernel 在請求時檢查限制（不是預先裝滿的盒子）
@@ -300,7 +538,7 @@
 
 ---
 
-## 9. 其他概念
+## 10. 其他概念
 
 ### trait
 - 定義一組共同行為，`impl Trait for Type` 顯式實作；可有預設方法、關聯型別（`type Output`）、可為空（marker）
@@ -330,7 +568,7 @@
 
 ---
 
-## 10. 誤解修正記錄（一路上被校正過的點）
+## 11. 誤解修正記錄（一路上被校正過的點）
 
 | 原本的理解 | 修正後 |
 |---|---|
@@ -364,3 +602,5 @@
 | kernel 通知 app | app 靠 syscall 回傳得知（pull） |
 | ulimit -n = kernel API 數 | = 同時開著的 fd（資源把手）數 |
 | 每次 syscall 佔 fd | syscall 是動作，fd 是資源編號 |
+
+copy / move / clone / borrow 那條線被校正的 17 點在第 4 節的陷阱清單，保留「為什麼」一欄，所以不併進這張兩欄表。
