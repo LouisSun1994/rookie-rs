@@ -66,25 +66,70 @@ cargo run --bin q07_minigrep -- [-i] [-n] <pattern> <file>
 
 ## 實驗
 
-每個都先預測，再試。
+每個都先預測，再試。預測和結果直接寫在各實驗下面。
 
-- A. 把 `search` 前面的 `pub` 拿掉
-- B. 分別執行這兩行，觀察畫面上還看得到什麼、`out.txt` 裡有什麼：
-  ```bash
-  cargo run -q --bin q07_minigrep -- The data/sample.txt > out.txt
-  cargo run -q --bin q07_minigrep -- The nope.txt > out.txt
-  ```
-- C. 把 `search` 簽名裡的三個 `'a` 全部拿掉
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+把 `search` 前面的 `pub` 拿掉
 
-寫在 `main.rs` 最上面。
+**預測**：
 
-1. `main.rs` 裡的 `mod search;` 這一行讓 rustc 去哪裡找檔案？拆成三個檔案之後，cargo 為了這個 binary 呼叫了幾次 rustc？
-2. 實驗 B：`>` 只導走了哪一個？這個「導向」是誰做的、在你的程式開始執行之前還是之後？
-3. 實驗 C：編譯器為什麼不能自己推斷？`'a` 在這裡告訴了編譯器什麼事？
-4. `search` 回傳的那些 `&str` 指向哪一塊記憶體？那塊記憶體的擁有者是哪個變數、在哪個函式的 frame 裡、活到什麼時候？
-5. `read_to_string` 從你的程式一路到磁碟，中間經過哪幾層？每一層各做什麼？
+**結果**：
+
+### 實驗 B
+
+分別執行這兩行，觀察畫面上還看得到什麼、`out.txt` 裡有什麼：
+
+```bash
+cargo run -q --bin q07_minigrep -- The data/sample.txt > out.txt
+cargo run -q --bin q07_minigrep -- The nope.txt > out.txt
+```
+
+**預測**：
+
+**結果**：
+
+### 實驗 C
+
+把 `search` 簽名裡的三個 `'a` 全部拿掉
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+`main.rs` 裡的 `mod search;` 這一行讓 rustc 去哪裡找檔案？拆成三個檔案之後，cargo 為了這個 binary 呼叫了幾次 rustc？
+
+**回答**：
+
+### 問題 2
+
+實驗 B：`>` 只導走了哪一個？這個「導向」是誰做的、在你的程式開始執行之前還是之後？
+
+**回答**：
+
+### 問題 3
+
+實驗 C：編譯器為什麼不能自己推斷？`'a` 在這裡告訴了編譯器什麼事？
+
+**回答**：
+
+### 問題 4
+
+`search` 回傳的那些 `&str` 指向哪一塊記憶體？那塊記憶體的擁有者是哪個變數、在哪個函式的 frame 裡、活到什麼時候？
+
+**回答**：
+
+### 問題 5
+
+`read_to_string` 從你的程式一路到磁碟，中間經過哪幾層？每一層各做什麼？
+
+**回答**：
 
 ## 交卷
 

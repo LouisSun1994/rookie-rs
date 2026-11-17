@@ -50,20 +50,73 @@ struct Player {
 
 ## 實驗
 
-每個都先預測，再試。
+每個都先預測，再試。預測和結果直接寫在各實驗下面。
 
-- A. 把 `let mut p = Player::new(…)` 的 `mut` 拿掉，再呼叫 `pick_up`
-- B. 在 `drop_all()` 之後呼叫 `p.total_weight()`
-- C. 印出 `std::mem::size_of::<Item>()` 和 `std::mem::size_of::<Player>()`。先算出你預測的數字
-- D. 幫 `Item` 實作 `Drop`，內容只做一件事：印出 `drop: {name}`。觀察 anvil 那一行出現在輸出的哪個位置，以及程式結束前其他物品的順序
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+把 `let mut p = Player::new(…)` 的 `mut` 拿掉，再呼叫 `pick_up`
 
-1. 實驗 C 你預測幾 bytes、實際幾 bytes？背包多放十個物品，`size_of::<Player>()` 會變嗎？為什麼？
-2. 撿完 sword 和 shield 的那一刻，畫出 stack 和 heap 的配置圖。heap 上總共有幾塊？每一塊的擁有者是誰？
-3. anvil 被拒絕之後，它的 `name` 佔的那塊 heap 是在哪一行程式碼的位置被釋放的？釋放的程式碼是誰寫的、誰放進去的、哪條 thread 執行的？
-4. `most_valuable` 回傳 `Option<&Item>`。如果改成回傳 `Option<Item>`，函式內容必須怎麼改？呼叫完之後背包會變成什麼樣？
-5. `drop_all(self)` 的 `self` 不是 `&self`。呼叫的那一刻，`p` 的哪些部分被搬走、哪些被釋放？
+**預測**：
+
+**結果**：
+
+### 實驗 B
+
+在 `drop_all()` 之後呼叫 `p.total_weight()`
+
+**預測**：
+
+**結果**：
+
+### 實驗 C
+
+印出 `std::mem::size_of::<Item>()` 和 `std::mem::size_of::<Player>()`。先算出你預測的數字
+
+**預測**：
+
+**結果**：
+
+### 實驗 D
+
+幫 `Item` 實作 `Drop`，內容只做一件事：印出 `drop: {name}`。觀察 anvil 那一行出現在輸出的哪個位置，以及程式結束前其他物品的順序
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+實驗 C 你預測幾 bytes、實際幾 bytes？背包多放十個物品，`size_of::<Player>()` 會變嗎？為什麼？
+
+**回答**：
+
+### 問題 2
+
+撿完 sword 和 shield 的那一刻，畫出 stack 和 heap 的配置圖。heap 上總共有幾塊？每一塊的擁有者是誰？
+
+**回答**：
+
+### 問題 3
+
+anvil 被拒絕之後，它的 `name` 佔的那塊 heap 是在哪一行程式碼的位置被釋放的？釋放的程式碼是誰寫的、誰放進去的、哪條 thread 執行的？
+
+**回答**：
+
+### 問題 4
+
+`most_valuable` 回傳 `Option<&Item>`。如果改成回傳 `Option<Item>`，函式內容必須怎麼改？呼叫完之後背包會變成什麼樣？
+
+**回答**：
+
+### 問題 5
+
+`drop_all(self)` 的 `self` 不是 `&self`。呼叫的那一刻，`p` 的哪些部分被搬走、哪些被釋放？
+
+**回答**：
 
 ## 交卷
 

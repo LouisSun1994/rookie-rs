@@ -55,38 +55,87 @@ struct Tokenizer<'a> {
 
 ## 實驗
 
-每個都先預測「編不編得過」，再試。
+每個都先預測「編不編得過」，再試。預測和結果直接寫在各實驗下面。
 
-- A. 原始字串比 token 早消失：
-  ```rust
-  let tokens: Vec<Token>;
-  {
-      let s = String::from("a + b");
-      tokens = Tokenizer::new(&s).collect();
-  }
-  println!("{:?}", tokens);
-  ```
-- B. `Tokenizer` 比 token 早消失，原始字串還在：
-  ```rust
-  let s = String::from("a + b");
-  let first;
-  {
-      let mut t = Tokenizer::new(&s);
-      first = t.next();
-  }
-  println!("{:?}", first);
-  ```
-- C. 把 `Ident(&'a str)` 改成 `Ident(String)`，把所有 `'a` 拿掉，讓程式編得過。比較前後兩個版本
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+原始字串比 token 早消失：
 
-1. 實驗 A 和 B 一個編不過、一個編得過。根據這個結果，`'a` 描述的是「誰」必須活著？分別說明為什麼下面兩個說法是錯的：
-   - 「`'a` 是 `Tokenizer` 活著的期間」
-   - 「`'a` 是某個函式的 stack frame」
-2. 一個 `Token::Ident` 在記憶體裡實際存了什麼？tokenize 整個字串並 `collect` 的過程中，heap 配置總共發生幾次、是誰配置的？
-3. 實驗 C：改成 `String` 之後，lifetime 為什麼就不需要了？換來的代價是什麼？
-4. 你只實作了 `next`，為什麼 `.filter()`、`.collect()`、`for` 都能用？那些方法的程式碼寫在哪一層？
-5. `impl<'a> Iterator for Tokenizer<'a>` 這一行出現兩次 `'a`，哪一個是宣告、哪一個是使用？
+```rust
+let tokens: Vec<Token>;
+{
+    let s = String::from("a + b");
+    tokens = Tokenizer::new(&s).collect();
+}
+println!("{:?}", tokens);
+```
+
+**預測**：
+
+**結果**：
+
+### 實驗 B
+
+`Tokenizer` 比 token 早消失，原始字串還在：
+
+```rust
+let s = String::from("a + b");
+let first;
+{
+    let mut t = Tokenizer::new(&s);
+    first = t.next();
+}
+println!("{:?}", first);
+```
+
+**預測**：
+
+**結果**：
+
+### 實驗 C
+
+把 `Ident(&'a str)` 改成 `Ident(String)`，把所有 `'a` 拿掉，讓程式編得過。比較前後兩個版本
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+實驗 A 和 B 一個編不過、一個編得過。根據這個結果，`'a` 描述的是「誰」必須活著？分別說明為什麼下面兩個說法是錯的：
+
+- 「`'a` 是 `Tokenizer` 活著的期間」
+- 「`'a` 是某個函式的 stack frame」
+
+**回答**：
+
+### 問題 2
+
+一個 `Token::Ident` 在記憶體裡實際存了什麼？tokenize 整個字串並 `collect` 的過程中，heap 配置總共發生幾次、是誰配置的？
+
+**回答**：
+
+### 問題 3
+
+實驗 C：改成 `String` 之後，lifetime 為什麼就不需要了？換來的代價是什麼？
+
+**回答**：
+
+### 問題 4
+
+你只實作了 `next`，為什麼 `.filter()`、`.collect()`、`for` 都能用？那些方法的程式碼寫在哪一層？
+
+**回答**：
+
+### 問題 5
+
+`impl<'a> Iterator for Tokenizer<'a>` 這一行出現兩次 `'a`，哪一個是宣告、哪一個是使用？
+
+**回答**：
 
 ## 交卷
 

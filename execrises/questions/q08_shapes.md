@@ -51,20 +51,66 @@ trait 定義「一組能力」，不同型別各自實作。用 trait 寫函式�
 
 ## 實驗
 
-每個都先預測，再試。
+每個都先預測，再試。預測和結果直接寫在各實驗下面。
 
-- A. 宣告 `let v: Vec<dyn Shape> = Vec::new();`（沒有 `Box`）
-- B. 把一個 `Circle` 和一個 `Rect` 放進同一個陣列，傳給 `sum_same`
-- C. 印出這四個型別的 `std::mem::size_of`，先寫下預測：
-  `&Circle`、`&dyn Shape`、`Box<Circle>`、`Box<dyn Shape>`
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+宣告 `let v: Vec<dyn Shape> = Vec::new();`（沒有 `Box`）
 
-1. 實驗 C：`&dyn Shape` 比 `&Circle` 多出來的那些 bytes 裡面放的是什麼？
-2. `print_static(&c)` 和 `print_dyn(&c)` 都會呼叫到 `Circle` 的 `area`。「要呼叫哪一個 `area`」這件事，在兩種寫法裡分別是誰決定的、在編譯期還是執行期決定的？
-3. `print_static` 分別用三種圖形各呼叫一次。編出來的執行檔裡，`print_static` 的機器碼有幾份？`print_dyn` 有幾份？各自的代價是什麼？
-4. 實驗 A：編譯器抱怨的是什麼？為什麼加上 `Box` 就可以？
-5. `print_impl` 的底層和 `print_static`、`print_dyn` 哪一個相同？
+**預測**：
+
+**結果**：
+
+### 實驗 B
+
+把一個 `Circle` 和一個 `Rect` 放進同一個陣列，傳給 `sum_same`
+
+**預測**：
+
+**結果**：
+
+### 實驗 C
+
+印出這四個型別的 `std::mem::size_of`，先寫下預測：
+`&Circle`、`&dyn Shape`、`Box<Circle>`、`Box<dyn Shape>`
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+實驗 C：`&dyn Shape` 比 `&Circle` 多出來的那些 bytes 裡面放的是什麼？
+
+**回答**：
+
+### 問題 2
+
+`print_static(&c)` 和 `print_dyn(&c)` 都會呼叫到 `Circle` 的 `area`。「要呼叫哪一個 `area`」這件事，在兩種寫法裡分別是誰決定的、在編譯期還是執行期決定的？
+
+**回答**：
+
+### 問題 3
+
+`print_static` 分別用三種圖形各呼叫一次。編出來的執行檔裡，`print_static` 的機器碼有幾份？`print_dyn` 有幾份？各自的代價是什麼？
+
+**回答**：
+
+### 問題 4
+
+實驗 A：編譯器抱怨的是什麼？為什麼加上 `Box` 就可以？
+
+**回答**：
+
+### 問題 5
+
+`print_impl` 的底層和 `print_static`、`print_dyn` 哪一個相同？
+
+**回答**：
 
 ## 交卷
 

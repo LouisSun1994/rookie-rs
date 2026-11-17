@@ -1,6 +1,9 @@
 # exercises
 
-Rust 動手練習。一題一個 binary：題目在 `questions/qNN_<slug>.md`，解答寫在 `src/bin/qNN_<slug>.rs`。
+Rust 動手練習。一題一個 binary：
+
+- 題目、實驗紀錄、問答與複盤：`questions/qNN_<slug>.md`
+- 程式碼：`src/bin/qNN_<slug>.rs`
 
 ## 進度
 

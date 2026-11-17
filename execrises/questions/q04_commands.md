@@ -84,18 +84,52 @@ enum Command {
 
 ## 實驗
 
-每個都先預測，再試。
+每個都先預測，再試。預測和結果直接寫在各實驗下面。
 
-- A. 在 `Command` 加一個 variant `Clear`，先不要改 `execute`，直接編譯。看完結果再把 `Clear`（清空背包）做完
-- B. 印出下面六個型別的 `std::mem::size_of`，先寫下你預測的數字：
-  `u32`、`Option<u32>`、`&str`、`Option<&str>`、`Command`、`Option<Command>`
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+在 `Command` 加一個 variant `Clear`，先不要改 `execute`，直接編譯。看完結果再把 `Clear`（清空背包）做完
 
-1. 實驗 B：`Option<u32>` 比 `u32` 大，`Option<&str>` 卻和 `&str` 一樣大。`None` 在這兩種情況下各自是怎麼被記錄的？
-2. 如果 `execute` 用了 `_ => {}`，實驗 A 會發生什麼？哪一種寫法會在「忘記處理新指令」時保護你？這個保護是在編譯期還是執行期生效？
-3. `execute` 裡 `match cmd { Command::Add(name, qty) => … }` 之後，`name` 的擁有者是誰？把它 `push` 進 `bag` 時，heap 上的字元有被複製嗎？
-4. Rust 沒有 `null`。那 `Option<&str>` 的 `None` 在機器層實際上長什麼樣子？它和 C 的 `NULL` 指標，差別在哪一層？
+**預測**：
+
+**結果**：
+
+### 實驗 B
+
+印出下面六個型別的 `std::mem::size_of`，先寫下你預測的數字：
+`u32`、`Option<u32>`、`&str`、`Option<&str>`、`Command`、`Option<Command>`
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+實驗 B：`Option<u32>` 比 `u32` 大，`Option<&str>` 卻和 `&str` 一樣大。`None` 在這兩種情況下各自是怎麼被記錄的？
+
+**回答**：
+
+### 問題 2
+
+如果 `execute` 用了 `_ => {}`，實驗 A 會發生什麼？哪一種寫法會在「忘記處理新指令」時保護你？這個保護是在編譯期還是執行期生效？
+
+**回答**：
+
+### 問題 3
+
+`execute` 裡 `match cmd { Command::Add(name, qty) => … }` 之後，`name` 的擁有者是誰？把它 `push` 進 `bag` 時，heap 上的字元有被複製嗎？
+
+**回答**：
+
+### 問題 4
+
+Rust 沒有 `null`。那 `Option<&str>` 的 `None` 在機器層實際上長什麼樣子？它和 C 的 `NULL` 指標，差別在哪一層？
+
+**回答**：
 
 ## 交卷
 

@@ -34,24 +34,84 @@ cargo add tokio --features full
 
 ## 實驗
 
-每個都先預測，再試。
+每個都先預測，再試。預測和結果直接寫在各實驗下面。
 
-- A. 連續送很多行，觀察同一條連線的 thread id 會不會變
-- B. 改成 `#[tokio::main(flavor = "current_thread")]`，在處理每一行的地方加 `std::thread::sleep(Duration::from_secs(5))`。
-  開兩個 client，A 送一行後 B 立刻送一行，觀察 B 多久後收到回應。
-  然後把它換成 `tokio::time::sleep(…).await` 再做一次
-- C. 回到預設的 multi-thread runtime，保留 `std::thread::sleep`，重做 B 的觀察
-- D. 在 task 裡拿一個 `std::sync::Mutex` 的 guard，不釋放，接著 `.await` 任何東西
-- E. 開十條連線，都不送資料。用 `ps -M <pid>`（macOS）看這個 process 有幾條 OS thread
+### 實驗 A
 
-## 在註解裡回答（先寫預測，再跑）
+連續送很多行，觀察同一條連線的 thread id 會不會變
 
-1. 實驗 A：同一條連線的 task 為什麼可以在不同 thread 上執行？task 在兩次執行之間，「它的狀態」存在哪裡？
-2. 實驗 B、C：三種組合（`current_thread` + `std::thread::sleep`、`current_thread` + `tokio::time::sleep`、multi-thread + `std::thread::sleep`）的結果各是什麼？分別說明那 5 秒內，哪條 thread 在做什麼、另一個 client 的 task 在哪裡。
-3. 實驗 D：編譯器抱怨什麼？它和 q11 的實驗 A 是不是同一條規則？
-4. 實驗 E：十條連線對應幾個 task、幾條 OS thread？一條閒置的連線，它的 task 此刻在不在任何佇列裡？誰會在資料到達時把它放回去？
-5. 寫出完整時間軸：「client A 按下 Enter」到「client B 的終端機顯示那一行」。
-   每一行標明：哪條 thread、user mode 還是 kernel mode、執行誰的程式碼、發生什麼事。
+**預測**：
+
+**結果**：
+
+### 實驗 B
+
+改成 `#[tokio::main(flavor = "current_thread")]`，在處理每一行的地方加 `std::thread::sleep(Duration::from_secs(5))`。
+開兩個 client，A 送一行後 B 立刻送一行，觀察 B 多久後收到回應。
+然後把它換成 `tokio::time::sleep(…).await` 再做一次
+
+**預測**：
+
+**結果**：
+
+### 實驗 C
+
+回到預設的 multi-thread runtime，保留 `std::thread::sleep`，重做 B 的觀察
+
+**預測**：
+
+**結果**：
+
+### 實驗 D
+
+在 task 裡拿一個 `std::sync::Mutex` 的 guard，不釋放，接著 `.await` 任何東西
+
+**預測**：
+
+**結果**：
+
+### 實驗 E
+
+開十條連線，都不送資料。用 `ps -M <pid>`（macOS）看這個 process 有幾條 OS thread
+
+**預測**：
+
+**結果**：
+
+## 問題
+
+回答直接寫在各題下面。
+
+### 問題 1
+
+實驗 A：同一條連線的 task 為什麼可以在不同 thread 上執行？task 在兩次執行之間，「它的狀態」存在哪裡？
+
+**回答**：
+
+### 問題 2
+
+實驗 B、C：三種組合（`current_thread` + `std::thread::sleep`、`current_thread` + `tokio::time::sleep`、multi-thread + `std::thread::sleep`）的結果各是什麼？分別說明那 5 秒內，哪條 thread 在做什麼、另一個 client 的 task 在哪裡。
+
+**回答**：
+
+### 問題 3
+
+實驗 D：編譯器抱怨什麼？它和 q11 的實驗 A 是不是同一條規則？
+
+**回答**：
+
+### 問題 4
+
+實驗 E：十條連線對應幾個 task、幾條 OS thread？一條閒置的連線，它的 task 此刻在不在任何佇列裡？誰會在資料到達時把它放回去？
+
+**回答**：
+
+### 問題 5
+
+寫出完整時間軸：「client A 按下 Enter」到「client B 的終端機顯示那一行」。
+每一行標明：哪條 thread、user mode 還是 kernel mode、執行誰的程式碼、發生什麼事。
+
+**回答**：
 
 ## 交卷
 
