@@ -33,11 +33,11 @@ fn main() {
 
     let mut p = Player::new("player", 10);
     println!("{} created, hp: {}", p.name, p.hp);
-    for item in &list {
+    for item in list {
         println!(
             "pickup {} result is {}",
             item.name.to_str(),
-            p.pick_up(item.clone())
+            p.pick_up(item)
         );
     }
 
@@ -47,7 +47,6 @@ fn main() {
         p.most_valuable()
             .map_or("null".to_string(), |f| f.value.to_string())
     );
-    p.bag.iter().for_each(|i| i.drop());
     println!("drop all is {}", p.drop_all().len());
 }
 
@@ -77,13 +76,9 @@ struct Item {
     value: u32,
 }
 
-trait Drop {
-    fn drop(&self);
-}
-
 impl Drop for Item {
-    fn drop(&self) {
-        println!("drop: {}", self.name.to_str())
+    fn drop(&mut self) {
+        println!("drop: {}", self.name.to_str());
     }
 }
 

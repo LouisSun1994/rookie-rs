@@ -11,7 +11,7 @@ Rust 動手練習。一題一個 binary：
 
 - [x] [q01：Collatz 步數](questions/q01_collatz.md) — 變數、`mut`、整數型別、函式、`loop`/`while`、expression
 - [x] [q02：字串的三種簽名](questions/q02_strings.md) — `String` vs `&str`、move、`&` / `&mut`
-- [ ] [q03：玩家背包](questions/q03_inventory.md) — `struct`、`impl`、`&self` / `&mut self` / `self`、`Vec`、`Drop`
+- [x] [q03：玩家背包](questions/q03_inventory.md) — `struct`、`impl`、`&self` / `&mut self` / `self`、`Vec`、`Drop`
 - [ ] [q04：指令解析器](questions/q04_commands.md) — `enum`、`match`、`Option`
 - [ ] [q05：RPN 計算機](questions/q05_rpn.md) — `Result`、`?`、自訂 error、`checked_*`
 
