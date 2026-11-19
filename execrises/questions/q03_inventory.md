@@ -56,7 +56,7 @@ struct Player {
 
 把 `let mut p = Player::new(…)` 的 `mut` 拿掉，再呼叫 `pick_up`
 
-**預測**：
+**預測**：fail,fn會改bag
 
 **結果**：
 
@@ -64,7 +64,7 @@ struct Player {
 
 在 `drop_all()` 之後呼叫 `p.total_weight()`
 
-**預測**：
+**預測**：fail,p已經被move(drop_all)且fn完後釋放
 
 **結果**：
 
@@ -72,7 +72,9 @@ struct Player {
 
 印出 `std::mem::size_of::<Item>()` 和 `std::mem::size_of::<Player>()`。先算出你預測的數字
 
-**預測**：
+**預測**：這邊根據rustc優化後計算方式，首先Item.name我用enum寫法，我會給兩版打小，分別是enum,&str，前者4+4+1，但因為rustc 4bytes一組所以是12bytes;後者，16+4+4=24bytes。
+
+再者Player,Vec->24bytes,String->24bytes,24+24+4+4=56。
 
 **結果**：
 
@@ -80,7 +82,7 @@ struct Player {
 
 幫 `Item` 實作 `Drop`，內容只做一件事：印出 `drop: {name}`。觀察 anvil 那一行出現在輸出的哪個位置，以及程式結束前其他物品的順序
 
-**預測**：
+**預測**：沒打印(anvil)，裝不進去包包。
 
 **結果**：
 
@@ -92,19 +94,28 @@ struct Player {
 
 實驗 C 你預測幾 bytes、實際幾 bytes？背包多放十個物品，`size_of::<Player>()` 會變嗎？為什麼？
 
-**回答**：
+**回答**： 
+```
+不會變，因為Vec的elements是在heap
+```
 
 ### 問題 2
 
 撿完 sword 和 shield 的那一刻，畫出 stack 和 heap 的配置圖。heap 上總共有幾塊？每一塊的擁有者是誰？
 
 **回答**：
+```
+針對player.bag回答，stack會有Vec狀態，分別指向heap兩個位置表示sword,shield。
+```
 
 ### 問題 3
 
 anvil 被拒絕之後，它的 `name` 佔的那塊 heap 是在哪一行程式碼的位置被釋放的？釋放的程式碼是誰寫的、誰放進去的、哪條 thread 執行的？
 
 **回答**：
+```
+這題我用enum版本回答，anvil item在 pick_up後就回收了，但是name不是會不見，這是寫在.rodata的靜態內容。
+```
 
 ### 問題 4
 
@@ -112,11 +123,32 @@ anvil 被拒絕之後，它的 `name` 佔的那塊 heap 是在哪一行程式碼
 
 **回答**：
 
+```=rust
+    fn most_valuable(&self) -> Option<Item> {
+        let mut max_value_item: Option<Item> = None;
+        for item in &self.bag {
+            if max_value_item.is_none() || item.value > max_value_item.unwrap().value {
+                max_value_item = Some(*item);
+            }
+        }
+        max_value_item
+    }
+```
+
+```
+呼叫完之後，本來的包背這個item就被回收了，除非改成clone()
+```
+
 ### 問題 5
 
 `drop_all(self)` 的 `self` 不是 `&self`。呼叫的那一刻，`p` 的哪些部分被搬走、哪些被釋放？
 
 **回答**：
+
+```
+move的話，fn結束後回收instance;
+反之，borrow的話還在。
+```
 
 ## 交卷
 
