@@ -2,6 +2,8 @@
 
 Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
+> **A note on AI use.** The notes in this repo are drafted by an AI tutor, but this is not AI slop. Each note comes out of a dialogue in which I stated my own model of the topic, had it corrected, and kept going until I could derive the conclusion myself. I have read every note and understand all of it; the misconceptions each one records are my own. Content that has not been confirmed with the tutor yet is marked `補強`.
+
 ## 背景
 
 - 熟悉 Go（GMP 排程模型）、後端 / 基礎設施、遊戲系統
