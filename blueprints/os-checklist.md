@@ -10,7 +10,7 @@
 | 子系統 | 已挖到 | 還沒碰的核心 |
 |---|---|---|
 | ① process | thread 本質、scheduler、wait queue（02）；fork / exec / spawn、ucred、process tree（05）；每個欄位各自複製／共用／重設、clone 與 wrapper（05 §11）；一個 process 裡 main thread 跑 loop、executor 把讀寫不衝突的 system 丟到 worker thread、另有 Render thread（經驗 03 §7、§13；§13 是骨架，未逐條走過）；`cargo run` 是 shell → cargo → rustc → cc / ld 一路 fork+exec 的 process 接力，LLVM 以函式庫的形式住在 rustc process 裡（經驗 03 §11.1、§11.8） | process 生命週期（zombie / wait / SIGCHLD）、process group / session / controlling tty / job control；boot 到 pid 1 |
-| ② 記憶體 | stack / heap（01）、COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§13 t5–t7；骨架，未逐條走過）；編譯與連結是兩步、目的檔的空格由 `ld` 照符號名字填、`ld`（建置期）與 `dyld`（執行期）的分工、Rust crate 之間靜態而系統函式庫動態（經驗 03 §10 步驟 1「為什麼要裝它」）；object file 的四個區塊與 linker 四步：收集、符號解析、排位址、relocation（經驗 03 §11.6）；`crate-type` 四種產物、靜態與動態各把機械碼放在哪、開 `dynamic_linking` 後 Bevy 與 `std` 兩條邊變成動態、只有 `@rpath` 而沒有 `LC_RPATH` 時 dyld 的失敗訊息（經驗 03 §12.5，含 Mac 實測） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
+| ② 記憶體 | stack / heap（01）；位址空間的區域與各頁權限、`static` 依型別分到 `.rodata` / `.data` / `.bss`、kernel 只鋪 page table 而每次存取由 MMU 查表、進 kernel 的三種方式、exec 只登記位址範圍而第一次碰才給實體頁（01 §5；page fault 只走到「會進 kernel 一次、回來重跑那條指令」，沒有逐步時間軸）；COW 提到（05）、ELF 載入（04）、page cache 與 fsync（02）；動態載入器流程 PT_INTERP → NEEDED → 符號版本 → 重定位 → `_start`、`dlopen` 與 NSS（經驗 01 §7）；macOS 側：連結時 `ld` 靠 SDK 的 stub、執行時 dyld 載入 framework 與 dylib，`cargo run` 用 `DYLD_FALLBACK_LIBRARY_PATH` 指路（經驗 03 §10 步驟 1、§13 t5–t7；骨架，未逐條走過）；編譯與連結是兩步、目的檔的空格由 `ld` 照符號名字填、`ld`（建置期）與 `dyld`（執行期）的分工、Rust crate 之間靜態而系統函式庫動態（經驗 03 §10 步驟 1「為什麼要裝它」）；object file 的四個區塊與 linker 四步：收集、符號解析、排位址、relocation（經驗 03 §11.6）；`crate-type` 四種產物、靜態與動態各把機械碼放在哪、開 `dynamic_linking` 後 Bevy 與 `std` 兩條邊變成動態、只有 `@rpath` 而沒有 `LC_RPATH` 時 dyld 的失敗訊息（經驗 03 §12.5，含 Mac 實測） | **page fault 完整時間軸**、頁表與 TLB、mmap / brk 與 malloc、swap——六個裡最缺的一塊 |
 | ③ 檔案 | fd / fileglob / vnode / VFS（05）；flock 掛 fileglob、git `.lock` 的 `O_EXCL + rename`（05 §9）；soft link 在 `namei` 解掉、MAC 看的是解析後路徑，`/var → /private/var`（經驗 02 §4–§5） | inode 是什麼、目錄只是 name→inode 表、hard link、unlink 只刪名字、mount 怎麼接樹 |
 | ④ IPC | epoll（01 / 02）、SCM_RIGHTS（05）、Mach port 與 right（05 §13）；unix socket 是有路徑的 vnode、`connect(AF_UNIX)` 走 VFS，ssh-agent 的簽名協議（經驗 02 §3–§4）；跨 VM 管線：9P over hvsocket、AF_VSOCK ↔ AF_HYPERV、binfmt_misc 把 `.exe` 交給 interop（06 §3–§4） | IPC 全家福對照（pipe / FIFO / signal / shm / Mach port / futex）；網路 stack 一次沒碰 |
 | ⑤ 安全 | DAC / MAC / Seatbelt / capability（05）；Windows token / ACL / AppContainer 與 WSL2 對照（05 §10）；`network-outbound` 單一 proxy 出口、unix-socket filter 字面比對、kernel 層 vs harness 分類器（經驗 02 §4、§6）；passphrase 是檔案內容的加密、與 DAC / MAC 的「讀不讀得到」分屬兩層，agent 的信任邊界與鑰匙圈（經驗 02 §3.5–§3.7）；hypervisor 層：VT-x / EPT / VM exit、type-1 的 root / child partition、VM / container / sandbox 三條線畫在哪、namespace 按子系統各一張表（06） | Linux 四根柱子裡的 seccomp / LSM 實測（namespace、cgroup 的模型已有）→ 容器 |
@@ -23,6 +23,7 @@
 - [ ] **1. page fault 的一生**
   - 切入點：`vec![0u8; 1<<30]` 後看 RSS 為何接近 0，寫一下才漲（`vmmap` / `/proc/self/status`）
   - 補哪裡：② + 模式 2、7；COW、mmap 的前置
+  - 已有：exec 只登記位址範圍、第一次碰到那一頁才 page fault、kernel 補上映射後回 user mode 重跑同一條指令（note 01 §5 思維鏈 t3–t4、t9）；仍缺進 kernel 之後的逐步時間軸、頁表與 TLB、RSS 實測
 - [ ] **2. process 的生死：zombie、SIGCHLD、session、tty、job control**
   - 切入點：`sleep 100 &` → `ps -o pid,ppid,pgid,sid,tty,stat`；Ctrl-Z / `fg` 誰收到什麼 signal
   - 補哪裡：① + 模式 3；解釋 sudo 沒 tty、daemon 為何 `setsid`
@@ -93,6 +94,11 @@
 - [ ] distro 停止與 VM 關機各由誰數、timer 各幾秒？對話推的是 VM 裡的 `/init` 數、distro 層 8 秒；`.wslconfig` 另有 `[wsl2] vmIdleTimeout`（預設 60000 ms）。WSL 開源後 `microsoft/WSL` 的 init 與 wslservice 都讀得到，直接查（note 06 §11 補強）
 - [ ] `/mnt/c` 上 open 被 Windows 側拒絕時，drvfs 回給 Linux 的 errno 是 EACCES 還是 EPERM？`ERROR_ACCESS_DENIED` 與 sharing violation 各對應到哪個？（note 06 §12 Q12）
 - [ ] bwrap 擋 interop 靠的是 mount ns 看不到 `/run/WSL/*_interop`、清掉 `WSL_INTEROP`，還是兩個都做？兩個都不做時 `.exe` 真的照跑嗎、binfmt_misc 把它交給誰？（note 06 §3 補強，可在 WSL2 機器上實測）
+
+**記憶體區域**（note 01 §5 留下）
+
+- [ ] 內容有指標的不可變 `static`（`static S: &str = "hi";`）在 macOS 落在 `__DATA_CONST`，啟動時要填位址：動手寫的是 `dyld` 在 user mode，還是 kernel 在載入那一頁時套用？同一支程式在 Linux 上是不是落在 `.data.rel.ro`、`readelf -l` 看得到 `GNU_RELRO`？（note 01 §5 補強；Mac 側只實測到落點與 segment 旗標，Linux 側未實測）
+- [ ] `const` 取參考得到的位址跟另一個內容相同的 `static` 是同一個（note 01 §5 補強，Mac 實測）。合併是 rustc、LLVM 還是 linker 做的？兩個內容相同的 `static` 也會被合併嗎，這跟「`static` 有固定且唯一的位址」衝不衝突？
 
 **libc / ABI / 載入器**（經驗 01 留下；經驗 01 §11 有入庫時推的答案，待 /校正）
 

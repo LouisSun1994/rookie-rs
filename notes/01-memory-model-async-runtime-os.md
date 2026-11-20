@@ -78,6 +78,8 @@
 ## 3. Stack 與 Heap
 
 > 「必須放 heap 的根本原因」那一條的方向，第 4 節修正過：大小固定只是放 stack 的資格；值會在 heap，是因為 `String` 這類型別的程式碼呼叫了 allocator，不是 rustc 看大小替你決定。
+>
+> stack 與 heap 以外的區域（`.rodata`、`.data`、`.bss`）、各區域的存取成本，以及 kernel 什麼時候進場，在第 5 節。
 
 - 每個函式呼叫開一個 stack frame，區域變數住在裡面，`main` 無特殊待遇
 - **Rust 從不偷偷把東西放 heap**：只有 `String`、`Vec`、`Box`、`HashMap`、`Rc`、`Arc` 等型別會配置 heap，且它們的 handle 仍在 stack
@@ -217,6 +219,8 @@ rustc 看到 let b = a;
 | `let` 區域變數 | stack | 必須大小固定 |
 | `Box::new(..)`、`v.push(..)` | heap | 不限 |
 
+> 第一列在第 5 節細分過：不可變的 `static` 才在唯讀區；`Atomic`、`Mutex` 這類可以修改的 `static` 在 `.data` 或 `.bss`；`const` 則沒有自己的位置。
+
 **關鍵細節**
 
 - rustc 從不自動配置 heap。會配置的只有 `String`、`Vec`、`Box` 這類型別的程式碼去呼叫 allocator。
@@ -332,7 +336,210 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 5. Rc / Arc / Send / Sync / 'static
+## 5. Process 的記憶體區域與 kernel 的角色
+
+> 回頭補的一節。接第 3 節（stack 與 heap）往外補上其他區域，接第 10 節（user mode ↔ kernel mode）從記憶體這一側看 kernel 什麼時候進場。`static` / `const` 與 ELF 區段在 [note 04 §10](04-borrow-exclusivity-lifetime-elf.md) 走過一次，這裡補上依型別分區、存取成本與三層保護。標 **補強** 的 blockquote 是整理進 repo 時加註的，不在原本這條線的對話裡；註明「Mac 實測」的是 rustc 1.87、Apple Silicon、`-O` 跑出來的。
+
+### 一句話版本
+
+一個 process 的 stack、heap、`.rodata`、`.data`、`.bss` 都是同一種 RAM，差別只在「空間怎麼來、位址怎麼找、誰負責歸還」。kernel 只在事前鋪好 page table，平常的讀寫是你的 thread 在 user mode 執行指令、由 CPU 的 MMU 查表完成，kernel 不在場。
+
+### 分層模型（骨架）
+
+```
+rustc / linker    決定每樣東西進哪個區段，寫進執行檔
+kernel            exec 時建立位址空間、設好 page table 與各頁權限
+                  之後只在 syscall、例外、中斷時進場
+CPU（MMU）        每一次記憶體存取：查 page table、檢查權限、換成實體位址
+你的 thread       在 user mode 執行 load / store 指令
+allocator（std）  user mode 的程式碼，管理 heap，不夠時才發 syscall
+```
+
+### 位址空間裡的區域
+
+**核心規則**：這些區域是同一個 process 位址空間裡的不同範圍，全部都是 RAM。位置由「怎麼建立的」決定。
+
+| 區域 | 放什麼 | 可寫 | 什麼時候出現 | 什麼時候消失 |
+|---|---|---|---|---|
+| `.text` | 機器碼 | 不可 | 程式載入 | process 結束 |
+| `.rodata` | 字串字面值、不可變的 `static` | 不可 | 程式載入 | process 結束 |
+| `.data` | 有初值的可變全域資料 | 可 | 程式載入 | process 結束 |
+| `.bss` | 初值是 0 的可變全域資料 | 可 | 程式載入 | process 結束 |
+| heap | `Box`、`Vec`、`String` 的內容 | 可 | 有人呼叫 allocator | 擁有者離開作用域 |
+| stack | 區域變數、參數、回傳位址 | 可 | 進入函式 | 函式回傳 |
+
+**關鍵細節**
+
+- 「可不可寫」是 kernel 載入執行檔時設在每一頁上的權限，由 CPU 在每次存取時檢查。
+- macOS 的執行檔格式區段名稱不同（`__TEXT`、`__DATA` 等），概念相同。
+- `.rodata` 既不是 stack 也不是 heap。
+
+### `const` 與 `static`
+
+**核心規則**：`const` 沒有儲存位置，編譯期把值代入每個使用處，最後嵌在機器碼裡。`static` 有固定位址，整個程式一份，活到 process 結束。
+
+| | `const` | `static` |
+|---|---|---|
+| 有固定位址嗎 | 沒有 | 有 |
+| 執行期存在嗎 | 不存在，只剩嵌在指令裡的值 | 存在 |
+| 能改嗎 | 不能 | 搭配 `Atomic`、`Mutex` 可以 |
+| 適合 | 單純的常數值 | 需要「同一份」的東西：計數器、快取、設定 |
+
+| 寫法 | 位置 | 能改嗎 |
+|---|---|---|
+| `const MAX: u32 = 5;` | 無，代入使用處 | 不能 |
+| `static MAX: u32 = 5;` | `.rodata` | 不能 |
+| `static N: AtomicU32 = AtomicU32::new(0);` | `.data` 或 `.bss` | 能，`fetch_add`、`store` |
+| `static L: Mutex<Vec<u32>> = Mutex::new(Vec::new());` | `.data` 或 `.bss` | 能，先 `lock()` |
+| `static C: LazyLock<T> = LazyLock::new(\|\| ..);` | `.data` 或 `.bss` | 第一次存取時初始化一次 |
+| `static mut N: u32 = 0;` | `.data` 或 `.bss` | 能，但每次都要 `unsafe`，不建議 |
+
+**關鍵細節**
+
+- `static` 的初值必須編譯期算得出來；需要配置 heap 或執行期才知道的，用 `LazyLock`。
+- `static` 的型別必須能安全地被多條 thread 同時存取，因為任何 thread 都拿得到它。
+- `static` 永遠不會被釋放，process 結束時也不執行它的 `drop`。
+- rustc 依型別決定區段：型別允許「透過 `&` 修改」的，放可寫區；否則放 `.rodata`。
+- interior mutability（內部可變性）：`Atomic`、`Mutex` 這類型別允許透過共享的 `&` 修改，因為它們自己保證安全。所以 `&T` 精確的意思是「共享的參考」，不是「一定唯讀」。
+- `static` 關鍵字和 `'static` lifetime 是兩件事：前者宣告全域變數，後者是說「這個參考永遠有效」。
+
+> **補強**：`const`「沒有儲存位置」精確的意思是「不保證有唯一的位址」，不是「內容一定不在記憶體裡」。小的值會變成指令裡的立即數；但 `const S: &str = "..";` 的字串內容、大陣列，或對它取參考（`&MAX`）時，rustc 還是會把內容放進唯讀區，只是每個使用處可以各拿一份，也可以被合併。Mac 實測：`&MAX` 印得出位址，而且跟另一個 `static S_RO: u32 = 5;` 是同一個位址（內容相同被合併了）。
+>
+> 會預測錯的是 `const` 配 interior mutability：每個使用處都是一份新的值。Mac 實測：
+>
+> ```rust
+> const CN: AtomicU32 = AtomicU32::new(0);
+>
+> CN.fetch_add(1, Ordering::SeqCst);
+> CN.fetch_add(1, Ordering::SeqCst);
+> CN.load(Ordering::SeqCst)          // 0：三行各用各的一份
+> ```
+>
+> 同樣三行把 `const` 換成 `static` 得到 2。計數器、鎖這類要「同一份」的東西只能用 `static`；clippy 的 `declare_interior_mutable_const` 會抓這個寫法。
+
+### 存取成本：差別不在區域
+
+**核心規則**：讀寫 stack、heap、static 的一個 byte，速度沒有差別。記憶體存取也不是 IO。
+
+| | 位址怎麼得到 | 取得與歸還空間的成本 | 讀一個值 |
+|---|---|---|---|
+| `const` | 沒有位址 | 無 | 通常不用讀記憶體 |
+| stack 變數 | stack 指標加固定位移 | 幾乎為零，移動指標 | 一次存取 |
+| `static` | link 時就固定 | 零，載入就在 | 一次存取 |
+| heap 上的資料 | 先讀出指標再跟過去 | 呼叫 allocator，最貴 | 兩次：指標、內容 |
+
+真正造成速度差異的是：
+
+| 原因 | 說明 |
+|---|---|
+| 配置與釋放 | heap 要呼叫 allocator，stack 和 static 不用 |
+| 多跳一次 | 透過指標找資料，多一次記憶體存取 |
+| CPU cache | 最近用過的記憶體讀起來快，stack 頂端幾乎總在 cache 裡 |
+| 同步的成本 | `Atomic`、`Mutex` 為了多 thread 安全要付額外代價 |
+
+> **補強**：「link 時就固定」固定的是 `static` 在執行檔映像裡的位移，不是絕對位址。現在的執行檔預設位址無關（PIE），kernel 每次載入都把整個映像放在不同的起點（ASLR）。Mac 實測同一個 `static` 連跑兩次：`0x1007d4fc8`、`0x100c64fc8`，尾端 `4fc8` 相同，前面不同。指令用「相對於目前這條指令的位移」找它，不必先查表，所以「一次存取」的結論不變；會錯的預測只有「這個位址每次執行都一樣」。
+
+### kernel 什麼時候在場
+
+**核心規則**：kernel 事先鋪好地圖（page table），之後一般的記憶體讀寫完全不經過它。進入 kernel 只有三種方式。
+
+| 進入方式 | 誰觸發 | 例子 |
+|---|---|---|
+| syscall | 你的程式主動要求 | 讀檔、網路、要更多記憶體、建立 thread |
+| 例外 | 你的指令執行時出狀況，CPU 強制跳進去 | page fault、除以零、寫唯讀頁 |
+| 中斷 | 外部硬體，跟你的程式在做什麼無關 | 計時器、網卡 |
+
+| 動作 | 進 kernel 嗎 |
+|---|---|
+| 讀寫已映射的記憶體（stack、heap、static 都一樣） | 不進 |
+| 函式呼叫、建立區域變數 | 不進 |
+| `Box::new`、`Vec::push` 大多數時候 | 不進，allocator 從手上已有的記憶體切一塊 |
+| allocator 手上不夠，要新的頁 | 進，syscall |
+| 第一次碰到一頁還沒實際配給的記憶體 | 進，page fault |
+| 寫入 `.rodata` | 進，例外，process 被終止 |
+| 讀檔、網路、印到螢幕 | 進，這些才是 IO |
+
+**關鍵細節**
+
+- 「進入 kernel」是同一條 thread 的 CPU 從 user mode 切到 kernel mode，改跑 kernel 的程式碼，做完切回來。kernel 一直都在記憶體裡，不需要啟動，也沒有另一個角色被叫醒。
+- exec 時 kernel 多半只登記「這段位址是你的」，實體 RAM 等第一次碰到那一頁才給。
+- 這樣設計的原因：進出 kernel 一次的成本是一次記憶體存取的上百倍。所以 kernel 管低頻的「誰能用哪些記憶體」，硬體負責每一次存取的檢查與轉換。
+- 比喻：kernel 是發地契的機關，MMU 是門口自動查驗地契的閘門。在自己的地上進出不用去機關，要新的地或闖進別人的地才會驚動它。
+
+> **補強**：「上百倍」是跟已經在 CPU cache 裡的那種存取比。拿第 10 節的數量級階梯對：L1 命中約 1 ns、syscall 約 0.5～1 µs，差 500～1000 倍；跟沒命中 cache、真的要到 RAM 拿的那一次（約 100 ns）比，只差 5～10 倍。方向不變：每次存取都進 kernel 付不起。
+
+### `.rodata` 的保護與內容來源
+
+**核心規則**：正常情況下沒有任何人寫 `.rodata`。「寫入 `.rodata`」是錯誤情境，三層各擋一次。
+
+| 層 | 怎麼擋 |
+|---|---|
+| rustc | 編譯期：不讓你透過 `&` 去改不可變的資料 |
+| CPU（MMU） | 執行期：那一頁沒有寫入權限，指令執行不了，觸發例外 |
+| kernel | 接到例外後終止 process |
+
+| 時間點 | 誰 | 對 `.rodata` 做什麼 |
+|---|---|---|
+| 編譯、link | rustc、linker | 把內容寫進執行檔 |
+| 載入 | kernel | 把內容放進 RAM，權限設成只讀 |
+| 執行期 | 你的程式 | 只能讀 |
+| 執行期，有人硬要寫 | CPU 加 kernel | 擋下並終止 |
+
+載入時把內容放進 RAM 的是 kernel，在 kernel mode 進行。頁的只讀權限管的是你的程式在 user mode 的存取。
+
+> **補強**：「不可變的 `static` 在 `.rodata`、內容由 kernel 載入」有一類例外：內容裡有指標的不可變 `static`，例如 `static S: &str = "hi";`。位址無關的執行檔要到載入後才知道 `"hi"` 的絕對位址，`S` 那 16 byte 裡的指標得在啟動時填上，所以它不能放在從頭到尾都唯讀的頁。
+>
+> | `static` | Mac 實測落在哪 | 那一段的權限 |
+> |---|---|---|
+> | `static S_RO: u32 = 5;` | `__TEXT,__const` | 從載入起就唯讀 |
+> | `static S: &str = "hi";`（`S` 本身的 16 byte） | `__DATA_CONST,__const` | 載入時可寫，標記為「位址填完後改成唯讀」 |
+> | `"hi"` 的內容 | `__TEXT` 裡的唯讀區 | 從載入起就唯讀 |
+>
+> Linux 的對應是 `.data.rel.ro` 加 RELRO：動態載入器 `ld.so` 在 user mode 把位址寫進去，再用 `mprotect` 這個 syscall 請 kernel 收回寫入權限（這台機器沒有實測；重定位那一步在經驗 01 §7）。macOS 由 `dyld` 安排同一件事，實際動手的是 `dyld` 還是 kernel 沒有查證。
+>
+> 所以「誰寫過唯讀資料」完整是三個時間點：linker 寫進檔案、kernel 載入、啟動時填位址。`main` 開始之後才是誰都不能寫，上面那張「三層各擋一次」的表講的是這之後的事。
+
+### 思維鏈：一個 process 從 exec 到讀寫記憶體
+
+```
+時間  誰 / mode             發生什麼
+t0   父 process            發出 exec syscall
+t1   kernel                建立位址空間；把執行檔的 .text、.rodata、.data 映射進來，
+                           登記 .bss 與 stack；設好各頁權限。實體 RAM 多半還沒給
+t2   kernel → user         跳到進入點，std 的啟動碼執行後呼叫 main
+t3   你的 thread / user    讀字面值 "hi"：load 指令 → MMU 查表 → 這一頁還沒載入
+                           → CPU 觸發 page fault
+t4   同一條 thread / kernel 把那一頁的內容備妥、補上映射，回 user mode 重跑那條指令
+t5   你的 thread / user    let x = 5;  移動 stack 指標、store。MMU 查表通過，kernel 不在場
+t6   你的 thread / user    COUNTER.fetch_add(..)  對 .bss 裡的位址執行原子指令，kernel 不在場
+t7   你的 thread / user    String::from("hi")  呼叫 allocator
+t8   allocator / user      手上有空間：切一塊回傳，不進 kernel
+                           手上不夠：發 syscall 向 kernel 要新的位址範圍
+t9   你的 thread / user    把 2 byte 從 .rodata 複製到 heap
+                           若這一頁是第一次碰：page fault → kernel 配一頁實體 RAM
+t10  任何時刻              計時器中斷 → CPU 強制進 kernel → 排程器可能換別的 thread 上來
+t11  你的 thread           println!  發 write syscall → 進 kernel → 回 user mode
+t12  main 結束             exit syscall → kernel 收回整個位址空間，static 不執行 drop
+```
+
+> **補強**：t1 到 t2 之間，動態連結的執行檔還有一段。kernel 把執行檔和動態載入器都映射進來之後，先跳到載入器；載入器在 user mode 把需要的函式庫映射進來、做重定位，才跳到程式的進入點（經驗 01 §7）。時間軸寫的「kernel 直接跳到進入點」是靜態連結的情況；macOS 上的執行檔都會經過 `dyld`。
+
+### 陷阱清單
+
+1. ❌ `static` 都寫在 `.rodata` → ✅ 不可變的才在 `.rodata`；`AtomicU32`、`Mutex` 這種可修改的在 `.data` 或 `.bss` → 為什麼：rustc 依型別是否允許透過 `&` 修改來決定區段，`.rodata` 的頁沒有寫入權限。
+2. ❌ thread 能直接用 `static`，是因為它在 `.rodata` → ✅ 是因為它活到 process 結束，擁有者不會先消失 → 為什麼：能不能借進 thread 看的是擁有者活多久，不是資料在哪。
+3. ❌ 沒寫 `mut` 就不可能被修改 → ✅ `Atomic`、`Mutex` 可以透過 `&self` 修改（interior mutability） → 為什麼：這些型別自己保證多 thread 下的安全，`&` 的意思是共享而不是唯讀。
+4. ❌ `const` 不在 static 區，所以在 stack → ✅ `const` 哪裡都不在，編譯期把值代入使用處、嵌進機器碼 → 為什麼：執行期沒有它這個東西；`let m = MAX;` 在 stack 上的是 `m` 這份副本。
+5. ❌ `static` 不在 stack，所以存取比較慢；記憶體存取是一種 IO → ✅ 所有區域都是同一種 RAM，讀寫一個值的速度相同；IO 指磁碟、網路 → 為什麼：速度差異來自配置成本、多跳一次指標、cache、同步，不是區域。
+6. ❌ 讀寫記憶體都要透過 kernel → ✅ 一般讀寫是 user mode 的指令加上 MMU 查表，kernel 不參與 → 為什麼：進出 kernel 的成本是記憶體存取的上百倍。
+7. ❌ 需要時會「啟動 kernel」 → ✅ 是「進入 kernel」：同一條 thread 切到 kernel mode 跑 kernel 的程式碼 → 為什麼：kernel 一直都在，不是一個等著被叫醒的角色。
+8. ❌ process 啟動時 kernel 把記憶體配好，之後就不再需要它 → ✅ 啟動時多半只登記位址範圍，實體 RAM 等第一次碰到才給，那時會進 kernel 一次 → 為什麼：page fault 不是你的程式主動要求的，是 CPU 觸發的。
+9. ❌ 只有索取資源時才會進 kernel → ✅ 有三種：syscall、例外、中斷 → 為什麼：計時器中斷讓 kernel 就算面對不發任何 syscall 的程式也拿得回 CPU。
+10. ❌ 程式載入時是在「寫入 `.rodata`」，所以它其實可寫 → ✅ 載入時把內容放進 RAM 的是 kernel，在 kernel mode 做；頁的只讀權限管的是 user mode 的存取 → 為什麼：之後任何 user mode 的寫入都會被 MMU 擋下。
+
+---
+
+## 6. Rc / Arc / Send / Sync / 'static
 
 ### Arc（Atomically Reference Counted）
 - 解決：多個 task/執行緒要共享同一份資料，編譯期無法決定誰最後結束 → 執行期計數
@@ -362,13 +569,14 @@ t6   main 結束                               釋放 Q                c 離開�
 | `&'static T` | lifetime 標記 | reference 指向整個程式期間都存在的東西（字串字面值、vtable） |
 | `T: 'static` | bound | 型別**不含會過期的借用**；`String`、`Arc<...>` 都滿足，可隨時 drop |
 
+- `static` 那一列放在哪個區段、能不能改、跟 `const` 差在哪，在第 5 節「`const` 與 `static`」
 - `'` 開頭是 lifetime 名稱，`'static` 是唯一內建的固定名稱
 - `tokio::spawn` 要求 `'static`：task 由 runtime 擁有，可能活得比呼叫函式久，不能借用區域變數 → 需要 `move` + `Arc::clone`
 - 不需要 Send/'static 的情況：`.await`、`join!`（子 Future 屬於當前 task，不會單獨跨執行緒、不會活更久）；`thread::scope` 允許借用（結構化並發）
 
 ---
 
-## 6. Closure 與 move
+## 7. Closure 與 move
 
 - `|x| x + 1`：`|...|` 是參數列表，不是 or；`||` 代表無參數
 - 可捕獲外部變數（`fn` 不行）；編譯器自動選最溫和的捕獲：只讀 → `&`、修改 → `&mut`、消耗 → 取走所有權
@@ -380,7 +588,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 7. async / Future / Waker
+## 8. async / Future / Waker
 
 ### Future
 - `trait Future { type Output; fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Output>; }`
@@ -444,7 +652,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 8. Tokio runtime 結構
+## 9. Tokio runtime 結構
 
 - `#[tokio::main]` 展開為 `Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {...})`
 - 三群執行緒：**main thread**（1 條，只 `block_on` 推動 main Future，不參與 work stealing）、**worker**（預設 = 邏輯 CPU 數，啟動時建好，各有本地佇列 + 全域佇列 + work stealing）、**blocking pool**（獨立，不從 worker 撥）
@@ -463,7 +671,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 9. 作業系統層
+## 10. 作業系統層
 
 ### process 與 thread
 - process = **資源容器**（獨立記憶體空間、fd 表、權限），動態向 kernel 要資源，kernel 在請求時檢查限制（不是預先裝滿的盒子）
@@ -489,6 +697,9 @@ t6   main 結束                               釋放 Q                c 離開�
 - 撞到執行緒限制：`thread::spawn` 回 `Err`（`Resource temporarily unavailable`）；撞到 fd 限制：`accept` 回 `Too many open files`
 
 ### user mode ↔ kernel mode
+
+> 從記憶體這一側看同一條線（哪些記憶體動作進 kernel、哪些不進，page fault 算哪一種）在第 5 節「kernel 什麼時候在場」。
+
 - CPU 兩種特權等級；切換由硬體自動完成，只有兩個觸發：執行 `syscall` 指令（自願）、中斷/例外（非自願）；應用程式無法自己切
 - kernel **不是 process**：它是有特權的程式碼，在**呼叫者自己的執行緒**上執行（換制服進限制區，本人去做）；排程器也只是 kernel 的一段程式碼
 - 每條執行緒兩個 stack：user stack（8 MB/2 MB）與 kernel stack（16 KB，user 不可存取，安全+可靠）；同一條執行緒在兩種模式用兩塊記憶體
@@ -538,7 +749,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 10. 其他概念
+## 11. 其他概念
 
 ### trait
 - 定義一組共同行為，`impl Trait for Type` 顯式實作；可有預設方法、關聯型別（`type Output`）、可為空（marker）
@@ -568,7 +779,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ---
 
-## 11. 誤解修正記錄（一路上被校正過的點）
+## 12. 誤解修正記錄（一路上被校正過的點）
 
 | 原本的理解 | 修正後 |
 |---|---|
@@ -603,4 +814,4 @@ t6   main 結束                               釋放 Q                c 離開�
 | ulimit -n = kernel API 數 | = 同時開著的 fd（資源把手）數 |
 | 每次 syscall 佔 fd | syscall 是動作，fd 是資源編號 |
 
-copy / move / clone / borrow 那條線被校正的 17 點在第 4 節的陷阱清單，保留「為什麼」一欄，所以不併進這張兩欄表。
+copy / move / clone / borrow 那條線被校正的 17 點在第 4 節的陷阱清單，保留「為什麼」一欄，所以不併進這張兩欄表。process 記憶體區域與 kernel 那條線被校正的 10 點在第 5 節的陷阱清單，同樣不併進來。

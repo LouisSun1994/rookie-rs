@@ -131,7 +131,7 @@ Rust 學習日誌。從零開始，記錄概念、踩坑與修正過的誤解。
 
 | 編號 | 主題 |
 |---|---|
-| [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、copy / move / clone / borrow（照抄值自己的 byte、`Copy` 是型別上的標籤、位置與 `Copy` 無關）、smart pointer、async runtime、作業系統層機制 |
+| [01](notes/01-memory-model-async-runtime-os.md) | 記憶體模型、ownership、copy / move / clone / borrow（照抄值自己的 byte、`Copy` 是型別上的標籤、位置與 `Copy` 無關）、process 的記憶體區域（`.rodata` / `.data` / `.bss`、`const` 與 `static`、存取成本不看區域、kernel 只在 syscall / 例外 / 中斷進場）、smart pointer、async runtime、作業系統層機制 |
 | [02](notes/02-tokio-runtime-os-scheduling.md) | Tokio 多執行緒 runtime、Task 與 Waker、epoll、OS 兩層排程、中斷 |
 | [03](notes/03-gpu-stack-driver-kernel.md) | 從應用程式到 GPU：引擎（libtorch / Candle）、廠商 SDK、user/kernel-mode driver、三種 kernel、ioctl 邊界與 DMA、GPU 路 vs 儲存路 |
 | [04](notes/04-borrow-exclusivity-lifetime-elf.md) | 借用與 `&` 的本質、多讀 XOR 單寫、borrow checker 在哪一層、獨佔／原子／互斥、閉包與 `thread::spawn`、lifetime 與 `'static`、`&'static str`、`static` / `const` 與 ELF 區段 |

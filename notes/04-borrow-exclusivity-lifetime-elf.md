@@ -314,6 +314,8 @@ t4  codegen                                             兩份獨立機器碼
 
 核心規則：**`'static` 是型別系統的標籤；`static` 是語言的儲存類別；`.rodata` 是 binary 的區段；三者分屬不同層。**
 
+> 這張表往下的細分在 [note 01 §5](01-memory-model-async-runtime-os.md)：`static` 依型別進 `.rodata` / `.data` / `.bss`、`const` 的「沒有位址」精確是什麼意思、各區域的存取成本、執行期 kernel 什麼時候進場。
+
 | Rust | 是什麼 | 放哪 |
 |---|---|---|
 | `static X: u32 = 5;` | 全程式唯一變數，有固定位址 | `.rodata`（不可變）/ `.data`（可變） |
