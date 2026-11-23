@@ -92,6 +92,66 @@ enum Command {
 
 **預測**：
 
+```=rust
+enum Command {
+    Add(String, u32), // 物品名稱、數量
+    Remove(String),
+    List,
+    Quit,
+    Clear,
+}
+
+impl Command {
+    fn parse(line: &str) -> Option<Command> {
+        match line.split_whitespace().collect::<Vec<&str>>().as_slice() {
+            ["add", item, count] if let Ok(count_32) = count.parse::<u32>() => {
+                Some(Command::Add(String::from(*item), count_32))
+            }
+            ["remove", item] => Some(Command::Remove(String::from(*item))),
+            ["list"] => Some(Command::List),
+            ["quit"] => Some(Command::Quit),
+            _ => {
+                println!("無法解析");
+                None
+            }
+        }
+    }
+    fn execute(cmd: Command, bag: &mut Vec<(String, u32)>) -> bool {
+        let rs = match cmd {
+            Command::Add(item, count) => {
+                println!("{item} x{count}");
+                match bag.iter_mut().find(|f| f.0 == item) {
+                    Some((_, quantity)) => *quantity += count,
+                    None => bag.push((item, count)),
+                }
+                true
+            }
+            Command::Remove(item) => {
+                match bag.iter().position(|f| f.0 == item) {
+                    Some(idx) => {
+                        bag.remove(idx);
+                    }
+                    None => println!("No item {item}"),
+                }
+                println!("remove {item}");
+                true
+            }
+            Command::List => {
+                bag.iter().for_each(|(k, v)| println!("{k} x{v}"));
+                true
+            }
+            Command::Quit => false,
+            Command::Clear => {
+                bag.clear();
+                true
+            }
+        };
+        rs
+    }
+}
+
+```
+
 **結果**：
 
 ### 實驗 B
@@ -100,6 +160,15 @@ enum Command {
 `u32`、`Option<u32>`、`&str`、`Option<&str>`、`Command`、`Option<Command>`
 
 **預測**：
+
+```
+u32 -> 4
+Option<u32> -> 8 (因為u32吃滿空間所以額外空間對齊後8)
+&str -> 16
+Option<&str> -> 16 (我有偷查，位址為空就是None的意思)
+Command -> 24+4=28 -> 32 (Max是Add(String,u32))
+Option<Command> -> 32 (enum的Key可作None)
+```
 
 **結果**：
 
@@ -113,11 +182,21 @@ enum Command {
 
 **回答**：
 
+```
+Option<32> 因為 u32 沒空間可借表示None所以對齊後變大。
+Option<&str> 使用指標表示None，所以不變。
+```
+
 ### 問題 2
 
 如果 `execute` 用了 `_ => {}`，實驗 A 會發生什麼？哪一種寫法會在「忘記處理新指令」時保護你？這個保護是在編譯期還是執行期生效？
 
 **回答**：
+
+```
+使用default => {}，這在compile可以pass，但是runtime執行會錯誤。
+實驗A則是 compile會反饋錯誤，因為沒有match所有struct。
+```
 
 ### 問題 3
 
@@ -125,11 +204,25 @@ enum Command {
 
 **回答**：
 
+```
+name型別是String，
+Command::Add(name,qty) => ... 
+這段執行時，name是被move了，所以execute完畢後就被釋放。
+push進bag時候，又move了一次，heap狀態都沒有變，變的是stack上持有的是哪個frame中對應變數位址。(我猜想，這邊應該就是frame的概念，但是否存在不會有frame的情境，應該不會？畢竟這Add就是透過fn invoke?幫我解答。)
+```
+
 ### 問題 4
 
 Rust 沒有 `null`。那 `Option<&str>` 的 `None` 在機器層實際上長什麼樣子？它和 C 的 `NULL` 指標，差別在哪一層？
 
 **回答**：
+
+```
+我猜測，
+rust是透過空指標表示None，是什麼樣子應該8bytes都是0(幫我解答)
+C的也是8byptes都是0。
+我有偷查，C可以操作空指標，rust則是必須斷言非空才可以，是這差異嗎？(幫我解答)
+```
 
 ## 交卷
 
