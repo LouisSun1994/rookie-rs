@@ -80,6 +80,8 @@
 > 「必須放 heap 的根本原因」那一條的方向，第 4 節修正過：大小固定只是放 stack 的資格；值會在 heap，是因為 `String` 這類型別的程式碼呼叫了 allocator，不是 rustc 看大小替你決定。
 >
 > stack 與 heap 以外的區域（`.rodata`、`.data`、`.bss`）、各區域的存取成本，以及 kernel 什麼時候進場，在第 5 節。
+>
+> 型別佔多少 byte、enum 的佈局、函式的機器碼與 stack frame 的邊界，在第 6 節。
 
 - 每個函式呼叫開一個 stack frame，區域變數住在裡面，`main` 無特殊待遇
 - **Rust 從不偷偷把東西放 heap**：只有 `String`、`Vec`、`Box`、`HashMap`、`Rc`、`Arc` 等型別會配置 heap，且它們的 handle 仍在 stack
@@ -264,6 +266,8 @@ v [ptr | len 2 | cap 2]
 
 **核心規則**：stack frame 的大小是 rustc 在編譯期算好的（所有區域變數的總和），進入函式時一次保留。函式內所有的 `let`、複製、move 都只是往這塊已保留的空間寫值。
 
+> 「所有區域變數的總和」在第 6 節修正過：那是主要來源，另外還有暫時值、padding、返回位址；frame 的邊界、和 page 的關係也在那裡。
+
 **關鍵細節**
 
 - stack 用量由「有幾個變數、各多大」決定，不由「複製了幾次」決定。迴圈裡的 `let b = a;` 跑一百萬次，都是寫進同一格。
@@ -338,7 +342,7 @@ t6   main 結束                               釋放 Q                c 離開�
 
 ## 5. Process 的記憶體區域與 kernel 的角色
 
-> 回頭補的一節。接第 3 節（stack 與 heap）往外補上其他區域，接第 10 節（user mode ↔ kernel mode）從記憶體這一側看 kernel 什麼時候進場。`static` / `const` 與 ELF 區段在 [note 04 §10](04-borrow-exclusivity-lifetime-elf.md) 走過一次，這裡補上依型別分區、存取成本與三層保護。標 **補強** 的 blockquote 是整理進 repo 時加註的，不在原本這條線的對話裡；註明「Mac 實測」的是 rustc 1.87、Apple Silicon、`-O` 跑出來的。
+> 回頭補的一節。接第 3 節（stack 與 heap）往外補上其他區域，接第 11 節（user mode ↔ kernel mode）從記憶體這一側看 kernel 什麼時候進場。`static` / `const` 與 ELF 區段在 [note 04 §10](04-borrow-exclusivity-lifetime-elf.md) 走過一次，這裡補上依型別分區、存取成本與三層保護。標 **補強** 的 blockquote 是整理進 repo 時加註的，不在原本這條線的對話裡；註明「Mac 實測」的是 rustc 1.87、Apple Silicon、`-O` 跑出來的。
 
 ### 一句話版本
 
@@ -466,7 +470,7 @@ allocator（std）  user mode 的程式碼，管理 heap，不夠時才發 sysca
 - 這樣設計的原因：進出 kernel 一次的成本是一次記憶體存取的上百倍。所以 kernel 管低頻的「誰能用哪些記憶體」，硬體負責每一次存取的檢查與轉換。
 - 比喻：kernel 是發地契的機關，MMU 是門口自動查驗地契的閘門。在自己的地上進出不用去機關，要新的地或闖進別人的地才會驚動它。
 
-> **補強**：「上百倍」是跟已經在 CPU cache 裡的那種存取比。拿第 10 節的數量級階梯對：L1 命中約 1 ns、syscall 約 0.5～1 µs，差 500～1000 倍；跟沒命中 cache、真的要到 RAM 拿的那一次（約 100 ns）比，只差 5～10 倍。方向不變：每次存取都進 kernel 付不起。
+> **補強**：「上百倍」是跟已經在 CPU cache 裡的那種存取比。拿第 11 節的數量級階梯對：L1 命中約 1 ns、syscall 約 0.5～1 µs，差 500～1000 倍；跟沒命中 cache、真的要到 RAM 拿的那一次（約 100 ns）比，只差 5～10 倍。方向不變：每次存取都進 kernel 付不起。
 
 ### `.rodata` 的保護與內容來源
 
@@ -539,7 +543,351 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 6. Rc / Arc / Send / Sync / 'static
+## 6. 佔多少空間：型別大小、enum、函式與 stack frame
+
+> 回頭補的一節。起點是動手練習時問的「`Command` 這個 enum 多大？`impl` 裡都是函式，函式有大小嗎？」，一路拆出三種不同的「大小」。接第 4 節（值自己的 byte、stack frame 與複製次數）往下補型別佈局與 frame 的邊界，接第 5 節（位址空間的區域）補上 `.text`。標「實測」的數字是 rustc 1.97、Linux x86-64 跑出來的；frame 的 160 byte 是 debug build。
+
+### 一句話版本
+
+「多大」有三個互不相干的答案：一個值佔多少 byte（看型別定義裡的欄位）、一個函式的機器碼多長（看函式內容，住在 `.text`）、一次函式呼叫要多少 stack（frame，編譯期算好的常數）。`enum` 和 `struct` 都只是在描述資料的形狀，`impl` 裡的函式不佔值的空間。
+
+### 分層模型（骨架）
+
+```
+rustc（編譯期）   算出每個型別的 size / alignment、enum 的 tag 放哪
+                  算出每個函式的 frame 多大，把數字寫死進函式開頭的指令
+                  把每個函式編成機器碼
+linker            把機器碼收進 .text，字面值收進 .rodata
+kernel            exec 時把 .text 映射成「可讀可執行」；給 thread 一塊 stack 區域
+                  之後 stack 裡怎麼切 frame，它不知道也不管
+CPU               stack pointer 暫存器記著 stack 用到哪；MMU 以 page 為單位查表
+你的 thread       在 user mode 執行函式開頭那條「stack pointer 減 N」→ frame 出現
+```
+
+### 三種「大小」
+
+**核心規則**：資料和程式碼住在不同地方。問大小之前先分清楚問的是哪一個。
+
+| 問的是 | 是什麼 | 由什麼決定 | 住在哪 | 有幾份 |
+|---|---|---|---|---|
+| 值的大小 | `size_of::<T>()` | 型別定義裡的欄位 | 那個值被放在哪就在哪（stack、heap、static 區） | 建立幾個值就幾份 |
+| 函式的機器碼 | 一串 CPU 指令 | 函式內容寫了多少 | `.text` | 整個程式一份 |
+| stack frame | 一次呼叫專用的 stack 空間 | 函式裡有哪些變數與暫時值 | 那條 thread 的 stack | 有幾次呼叫還沒返回就幾份 |
+
+```
+執行檔（載入後不變）                STACK（隨呼叫變化）
+┌──────────────────┐             ┌───────────────────┐
+│ .text            │             │ main 的 frame      │
+│   parse 的機器碼  │             │   bag、lines …     │
+│   execute 的機器碼│             ├───────────────────┤
+│   main 的機器碼   │             │ execute 的 frame   │
+├──────────────────┤             │   cmd: Command 32  │ ← 一個值被放進了這個 frame
+│ .rodata          │             │   bag、idx …       │
+│   "add" "remove" │             └───────────────────┘
+└──────────────────┘
+```
+
+**關鍵細節**
+
+- 三者之間沒有固定的大小關係。唯一成立的是「容器不小於內容物」：一個 frame ≥ 直接放在它裡面的所有值的總和。
+- 一個 `Command` 也可以在 heap（`Vec<Command>` 的元素），那時它和任何 frame 的大小都無關。
+- 機器碼在 `.text`（可讀、可執行），字面值在 `.rodata`（只可讀）。兩者都來自執行檔、都不可寫，差別在一個給 CPU 執行，一個給程式讀取。
+
+### 型別的大小：欄位、對齊、padding
+
+**核心規則**：`size_of::<T>()` 是編譯期常數，只算「值自己的 byte」。算法是欄位加總，再補到對齊的整數倍。
+
+1. 型別的對齊（alignment）= 欄位中最大的對齊
+2. 型別的大小必須是對齊的整數倍，不足的補空白（padding）
+
+| 型別 | 欄位加總 | 對齊 | `size_of`（實測） |
+|---|---|---|---|
+| `Item { name: ItemName, weight: u32, value: u32 }`，`ItemName` 是無欄位 enum | 1 + 4 + 4 = 9 | 4 | 12 |
+| 同上，`name: &str` | 16 + 4 + 4 = 24 | 8 | 24 |
+| 同上，`name: String` | 24 + 4 + 4 = 32 | 8 | 32 |
+| `Player { name: String, hp: u32, capacity: u32, bag: Vec<Item> }` | 24 + 4 + 4 + 24 = 56 | 8 | 56 |
+
+**關鍵細節**
+
+- `Vec` 放再多元素，`size_of::<Player>()` 都是 56：算進去的只有 `Vec` 的 ptr、len、cap 三個欄位，元素在 heap。
+- `Vec` 只有**一個**指標，指向**一塊**連續空間，元素一個挨一個。相鄰兩個元素的位址差就是 `size_of::<Item>()`（實測差 12）。
+- `&str` 固定 16 byte（位址 + 長度），和指向的字串多長無關。`String` 多一個容量，24 byte。
+
+### enum：每個 variant 是一個 struct，外加 tag
+
+**核心規則**：`enum` 的意思是「這個值是下面幾種 struct 的其中一種」。大小 = 最大的那個 variant + 記錄「現在是哪一種」的 tag。
+
+> **tag 還沒正式學到。** 這一節只把它當成「enum 裡記錄現在是哪個 variant 的那個 key」來推算大小。它的正式名稱（discriminant）、實際是什麼型別、rustc 把它放在哪、怎麼指定（`#[repr]`）或讀出來（`std::mem::discriminant`），都還沒挖。下面的佈局圖是推算用的概念圖，不是 rustc 實際的佈局。
+
+variant 的三種寫法和 struct 的三種寫法一一對應：
+
+| 形式 | struct | enum 的 variant | 欄位怎麼取 |
+|---|---|---|---|
+| 具名欄位 | `struct P { x: i32, y: i32 }` | `Move { x: i32, y: i32 }` | 用名字 |
+| tuple 形式 | `struct P(i32, i32);` | `Add(String, u32)` | 用位置 |
+| 沒有欄位 | `struct Marker;` | `List`（等價於 `List {}`） | 沒有東西可取 |
+
+```rust
+enum Command {
+    Add(String, u32),   // 24 + 4 = 28   ← 最大
+    Remove(String),     // 24
+    List,               // 0
+    Quit,               // 0
+    Clear,              // 0
+}
+// 最大 28 → 對齊 8 → 32。tag 只要 1 byte，補出來的 4 byte 放得下，不另外佔空間。
+// size_of::<Command>() == 32（實測）
+```
+
+```
+                 0        8        16       24    28   29     32
+Add("sword",2)   [ ptr    | len=5  | cap=5  | 2   |tag | 補白  ]
+Remove("sword")  [ ptr    | len=5  | cap=5  |沒用到|tag | 補白  ]
+List             [ 沒用到                          |tag | 補白  ]
+```
+
+（tag 實際放在哪個位置由 rustc 決定，這是用來推算大小的概念圖。）
+
+**關鍵細節**
+
+- `Add(String, u32)` 的括號是**欄位**，不是參數。它和 `Add { name: String, qty: u32 }` 是同一件事，只差欄位沒取名。
+- 值是 `Command::List` 的變數仍然佔 32 byte。`List` 自己帶的資料是 0，但變數的型別是 `Command`，同型別的值必須一樣大，才放得進 `Vec<Command>` 這種每格等寬的容器。
+- 每個 variant 都沒有欄位的 enum 只剩 tag：`enum ItemName { Sword, Shield, Anvil, Potion }` 是 1 byte，本質上是一個小整數。
+- tag 有兩個地方可以放，都不會讓 enum 變大：對齊補出來的空 byte，或某個欄位裡不會出現的值（下一小節的 niche）。兩種都沒有時才需要另外佔空間。實測（把 `String` 換成同樣 24 byte、沒有任何空位的 `[u64; 3]`）：
+
+  | 型別 | 欄位裡有空位 | 有補白 | `size_of` |
+  |---|---|---|---|
+  | `Command { Add(String, u32), … }` | 有 | 有 | 32 |
+  | `NoNiche { Add([u64; 3], u32), … }` | 沒有 | 有（4 byte） | 32 |
+  | `NoSlack { Add([u64; 3], u64), … }` | 沒有 | 沒有 | 40（tag 1 + 對齊 7） |
+- 執行期的 `match` 就是讀 tag、跳到對應的 arm。
+- `Option<T>` 只是 std 裡一個普通的 enum（`None` / `Some(T)`），適用同一套規則。
+
+### niche：借一個不會出現的值
+
+**核心規則**：「型別佔多少空間」和「型別有幾種合法的值」是兩件事。前者能表示的組合數減掉後者，剩下的就是空位（niche）。`Option<T>` 如果能在 `T` 裡找到一個空位，就拿它當 `None`，不用自己開 tag；找不到才另外開。借的是「不會出現的值」，不是「多餘的 byte」。
+
+判斷只要問一句：**這個型別裡，有沒有任何一個欄位存在「合法的值永遠不會是它」的 bit 組合？**
+
+#### enum 的 tag 本身就是空位：兩層 enum 共用一個 tag
+
+`Command` 是 enum，裡面有一個 tag 記「現在是哪個 variant」。`Option<Command>` 也是 enum，照理也需要一個 tag 記「`Some` 還是 `None`」。但 `Command` 的 tag 是 1 byte、只用了 5 個值，`Option` 就不另外開，直接借第 6 個值：
+
+| tag 的值 | 代表 |
+|---|---|
+| 0 | `Some(Add(…))` |
+| 1 | `Some(Remove(…))` |
+| 2 | `Some(List)` |
+| 3 | `Some(Quit)` |
+| 4 | `Some(Clear)` |
+| 5 | `None` |
+| 6 到 255 | 還沒用到 |
+
+不共用的話會是 `[Option 的 tag | Command 32 byte]` = 33，對齊後 40。合併成一個 tag 省下這 8 byte，這個動作就是 niche optimization。
+
+所以 `Option<Command>` 是 32 要分兩步看：
+
+| 步驟 | 問題 | 靠什麼 |
+|---|---|---|
+| `Command` = 32 | `Command` 自己的 tag 放哪 | 對齊補出來的空 byte |
+| `Option<Command>` = 32 | `None` 怎麼表示 | tag 那個 byte 裡沒用到的值 |
+
+#### 借得到的型別（`Option<T>` 和 `T` 一樣大，實測）
+
+| 類別 | 型別 | 大小 | 借的是什麼 |
+|---|---|---|---|
+| 不可能是空的指標 | `&T`、`&mut T`、`Box<T>`、`Rc<T>`、`Arc<T>`、`NonNull<T>`、`fn()` | 8 | 位址 0 |
+| 胖指標 | `&str`、`&[T]` | 16 | 指標欄位的 0 |
+| 內含上述指標的容器 | `String`、`Vec<T>` | 24 | 內部欄位不會出現的值 |
+| | `HashMap<K, V>` | 48 | 同上 |
+| 用不滿的基本型別 | `bool` | 1 | 2 到 255 |
+| | `char` | 4 | 超出 Unicode 範圍的值 |
+| 明確排除 0 的整數 | `NonZeroU32` 等 | 4 | 0 |
+| enum 的 tag | `ItemName`、`Command`、`Ordering`，任何沒把 tag 用滿的 enum | 1 / 32 / 1 | tag 沒用到的值 |
+| 有限制範圍的欄位 | `Duration` | 16 | 奈秒欄位不會超過 10 億 |
+| | `File` | 4 | fd 不會是 -1 |
+| 含有以上任一欄位的複合型別 | `(u32, bool)`、`struct { a: u32, b: bool }`、`[bool; 2]` | 8 / 8 / 2 | 裡面那個欄位的空位 |
+
+#### 借不到的型別（每一種 bit 組合都是合法的值，實測）
+
+| 類別 | 型別 | `T` | `Option<T>` |
+|---|---|---|---|
+| 整數 | `u8` | 1 | 2 |
+| | `u32`、`i32` | 4 | 8（tag 1 + padding 3 + 4） |
+| | `u64`、`usize` | 8 | 16 |
+| 浮點數 | `f64` | 8 | 16 |
+| 原始指標 | `*const T` | 8 | 16 |
+| 只由上述組成的複合型別 | `[u8; 4]` | 4 | 5 |
+| | `(u32, u32)`、`struct { a: u32, b: u32 }` | 8 | 12 |
+| 空型別 | `()` | 0 | 1 |
+
+#### 空位會被用掉
+
+| 型別 | 大小 | 說明 |
+|---|---|---|
+| `Option<&u32>` | 8 | 借了位址 0 |
+| `Option<Option<&u32>>` | 16 | 指標只有 0 這一個空位，裡面那層用掉了，外面那層只好自己開 tag |
+| `Option<bool>` | 1 | 借了 2 |
+| `Option<Option<bool>>` | 1 | `bool` 有 254 個空位，再借一個也夠 |
+
+```
+                 指標（8 byte）            長度（8 byte）
+Some("hi")       00 10 00 00 00 00 00 00   02 00 00 00 00 00 00 00
+None             00 00 00 00 00 00 00 00   ?? ?? ?? ?? ?? ?? ?? ??
+                 └ 全 0 代表 None ────────┘   └ 不看 ────────────────┘
+```
+
+**關鍵細節**
+
+- 複合型別只要**其中一個欄位**借得到，整個就借得到：`(u32, bool)` 靠裡面的 `bool`；`(u32, u32)` 兩個欄位的每個值都合法，借不到。
+- 空位不限於指標。指標的 0、`bool` 的 2 到 255、enum 的 tag 沒用到的值，都是同一回事。
+- `&T` 和 `*const T` 同樣是 8 byte 的位址。`*const T` 允許是 null，0 是合法值，所以借不到。差別完全來自型別的規則，不是佔用的空間。
+- `u32` 和 `NonZeroU32` 同樣 4 byte。後者保證不是 0，存在的目的之一就是讓 `Option<NonZeroU32>` 維持 4 byte。
+- `&str` 的 16 byte 全部都有用途。能借，是因為指標欄位的 2⁶⁴ 種值裡有一個（0）永遠不會被合法的 reference 用到。空字串的指標也不是 0。
+- `bool` 邏輯上只要 1 bit，但記憶體最小定址單位是 byte，所以佔 1 byte、空出 254 個值。`Option<bool>` 有三種狀態，一個 byte 放得下。
+- `Option<&str>` 的 `None` 在機器層和 C 的 `NULL` 是同樣的 bits。差別在型別層：`&str` 保證不是空的，`Option<&str>` 不先處理 `None` 就編不過。「Rust 沒有 null」指的是沒有「任何 reference 都可能偷偷是空的」這件事，執行期的表示法和成本都沒變。
+
+### `impl` 與函式不佔值的空間
+
+**核心規則**：`enum Command { … }` 描述資料，`impl Command { … }` 放函式。`size_of` 只看前者。函式是程式碼，整個程式一份，住在 `.text`。
+
+- `impl` 是命名上的歸屬，不是把函式塞進每個值裡。把整個 `impl` 區塊刪掉，`size_of::<Command>()` 不變。
+- `Command::execute(cmd, bag)` 編譯後是「跳到某個固定位址」，位址編譯期就決定。值裡面沒有任何東西指向函式。
+- Rust 的 struct / enum 沒有隱藏欄位，定義了什麼欄位就是什麼。（每個物件帶一個指向類別的隱藏指標，是 Java、Python 的做法。）
+- 定義 tuple 形式的 variant 之後，`Command::Add` 這個名字同時可以當建構函式用（`fn(String, u32) -> Command`）。定義處是資料的形狀，使用處看起來像呼叫函式；那個函式一樣住在 `.text`。
+- 函式本身當成值來看是 0 byte（實測 `size_of_val(&main)` 是 0）；函式指標 `fn()` 是 8 byte。
+
+### stack frame：一次呼叫的位址範圍
+
+**核心規則**：frame 不是一個物件，是 stack 區域裡「屬於這一次函式呼叫」的那一段位址範圍。大小是編譯期常數，寫死在函式開頭的指令裡；執行期變動的只有「現在疊了幾個」。
+
+```
+depth:                ; 概念示意，數字含返回位址等雜項
+    sub  rsp, 160     ; stack pointer 往下移 160 → frame 出現
+    …函式內容…
+    add  rsp, 160     ; 移回來 → frame 消失
+    ret               ; 跳回 frame 裡存的返回位址
+```
+
+| | 什麼時候決定 | 誰決定 |
+|---|---|---|
+| 一個函式的 frame 多大 | 編譯期 | rustc |
+| 變數在 frame 裡的位置 | 編譯期 | rustc |
+| 現在 stack 上有幾個 frame、是誰的 | 執行期 | 程式實際怎麼跑 |
+| stack 總共用了多少 | 執行期 | 各 frame 大小的加總 |
+
+frame 裡放的東西：參數、區域變數、沒有名字的暫時值、padding、返回位址、保存的暫存器。區域變數的總大小是主要來源，不是精確公式：實測一個只有一個 `u32` 區域變數、內含 `println!` 的函式，debug build 的 frame 是 160 byte，多出來的大多是 `println!` 背後的暫時值。最佳化之後也可能更小（變數留在暫存器、位置共用、整個函式被 inline）。
+
+什麼會產生新的 frame：
+
+| 寫法 | 新 frame |
+|---|---|
+| 呼叫函式、方法、closure | 會（沒被 inline 的話） |
+| `{ … }` 區塊、`if` / `match` 的分支 | 不會 |
+| `for` / `while` / `loop` 的每一圈 | 不會 |
+
+**關鍵細節**
+
+- 邊界是每一次**呼叫**，不是每個函式**定義**。一個函式只定義一次，遞迴四層就同時有四個它的 frame；從沒被呼叫的函式一個都沒有。
+- scope 和 frame 是兩回事：scope（每個 `{}`）管變數能不能用、何時 `Drop`，是編譯期規則；frame（每次呼叫）管變數的 byte 放在哪，是執行期的記憶體。內層區塊的變數離開 `}` 就不能用，但它那幾個 byte 要到函式返回才一起收回。
+- 每次呼叫一個 frame 換來三件事：遞迴時每層的區域變數互不覆蓋、多條 thread 能同時跑同一個函式、函式不用知道誰呼叫它（返回位址在自己的 frame 裡）。
+- 配置是「暫存器減一個數字」，回收是「加回來」，各一條指令，裡面有幾個變數都一次收完。擁有 heap 資源的變數，rustc 會在收回之前先插入它們的 `Drop`。
+- 執行期沒有任何表格記錄 frame 的界線。界線靠 stack pointer 和每個 frame 裡的返回位址維持。
+- 返回時 frame 的內容不會被清掉，只是 stack pointer 移回去；下一次呼叫的 frame 會直接蓋在上面。
+- 編譯期知道每個 frame 多大，但不知道會疊多深，所以 stack overflow 只能在執行期發現。
+- frame 的大小必須編譯期固定，這就是「大小不固定的東西進不來、只能放 heap」的另一種說法；`String` 留在 frame 裡的是固定 24 byte 的把手。
+- 語言層的模型是「以值傳入的參數在被呼叫者的 frame 裡」。機器碼層，超過 16 byte 的值通常由呼叫端放在自己的 frame，再把位址交過去。不影響所有權的語意。
+
+### frame 與 page：不同層
+
+**核心規則**：frame 是程式自己在 stack 區域裡劃的位址範圍；page 是 kernel 和 MMU 把虛擬位址對應到實體記憶體的單位。兩者的邊界互不對齊。
+
+| | stack frame | page |
+|---|---|---|
+| 屬於哪層 | 程式（rustc 產生的機器碼） | kernel 與 CPU 的 MMU |
+| 是什麼 | 一次函式呼叫用的位址範圍 | 虛擬位址對應實體記憶體的最小單位 |
+| 大小 | 每個函式不同，編譯期決定 | 固定，4 KB（Apple Silicon 是 16 KB） |
+| 誰劃分 | 函式開頭的 `sub rsp, N` | kernel 設定的 page table |
+| 誰知道它 | 只有程式自己 | 只有 kernel 和 CPU |
+
+```
+程式層     frame        「這 160 byte 是 depth(1) 的」          stack pointer 劃分
+kernel 層  stack 區域    「這 8 MB 虛擬位址是這條 thread 的」    thread 建立時保留
+           page         「這 4 KB 對應到哪塊實體記憶體」         page table
+硬體層     實體記憶體    真正的 RAM
+```
+
+- 一個 4 KB 的 page 放得下很多個小 frame；宣告了大陣列的函式，單一 frame 也可以橫跨好幾個 page。
+- stack 區域的 page 是第一次碰到才給實體記憶體（page fault，見第 5 節）。
+- stack 區域最底下有一個不可存取的 guard page。frame 疊到那裡，寫入時 MMU 發現不可存取 → 通知 kernel → kernel 送 signal → std 印出 `has overflowed its stack`。
+- OS 資料裡的 **page frame** 指「一個 page 大小的實體記憶體」，和 stack frame 無關，只是剛好同名。
+
+### 思維鏈 A：`size_of::<Command>()` 怎麼算（全部發生在編譯期）
+
+```
+步驟  誰      做什麼
+1     rustc   只看 enum Command { … } 這個區塊，impl 區塊不看
+2     rustc   算每個 variant 的欄位：Add 28、Remove 24、List / Quit / Clear 各 0
+3     rustc   取最大的 28
+4     rustc   對齊 = 欄位中最大的對齊 = 8（String 裡有指標）
+5     rustc   28 補到 8 的倍數 → 32
+6     rustc   需要 5 種 tag（1 byte）；補出來的 4 byte 放得下 → tag 不另外佔空間
+7     rustc   size_of::<Command>() = 32，當成常數嵌進用到它的機器碼
+8     rustc   Option<Command>：tag 只用了 5 個值，借第 6 個代表 None → 仍是 32
+9     執行期  沒有任何人在「計算大小」；match 只是讀 tag 再跳轉
+```
+
+### 思維鏈 B：遞迴四層的 frame 生滅
+
+```rust
+fn depth(n: u32) {
+    let local = n;
+    println!("depth({n})  local 的位址 = {:p}", &local);
+    if n < 3 { depth(n + 1); }
+}
+```
+
+實測四個 `local` 的位址依序相差 `0xa0`（160），越來越小。
+
+```
+時間  thread / mode    跑誰的程式碼           發生什麼                         stack
+t0    main / user      main                   call depth(0)                    [main]
+t1    main / user      depth 開頭（rustc 埋） sub rsp,160；local=0 寫進 frame   [main][d0]
+t2    main / user      depth                  call depth(1)，返回位址存進 stack [main][d0]
+t3    main / user      depth 開頭             sub rsp,160；local=1              [main][d0][d1]
+t4    main / user      depth                  同上兩次                          [main][d0][d1][d2][d3]
+t5    main / user      depth 結尾（rustc 埋） d3：add rsp,160；ret              [main][d0][d1][d2]
+t6    main / user      depth 結尾             d2、d1、d0 依序返回               [main]
+```
+
+- 全程同一條 thread、全程 user mode，kernel 沒有進場。唯一可能進 kernel 的是 stack 長到一個還沒碰過的 page 時的 page fault，以及 `println!` 的 write。
+- `depth` 的機器碼只有一份；`local` 有四份，各在自己的 frame。
+- 把 `3` 換成執行期才知道的數字，會疊幾層編譯期就無法得知。
+
+### 陷阱清單
+
+1. ❌ `impl` 裡寫了很多函式，所以這個型別比較大 → ✅ `size_of` 只看 `struct` / `enum` 定義裡的欄位 → 為什麼：函式是程式碼，整個程式一份放在 `.text`，不在每個值裡。
+2. ❌ `Add(String, u32)` 是函式，enum 裡面都是函式 → ✅ 那是欄位宣告，括號裡是欄位的型別 → 為什麼：enum 的每個 variant 都只是一種 struct；`Command::Add(a, b)` 在使用處才是呼叫建構函式。
+3. ❌ 函式的大小 = 參數 + 回傳值 → ✅ 函式有兩種大小：機器碼長度（看內容）與 frame 大小（看變數與暫時值） → 為什麼：參數只是 frame 裡的一部分；小的回傳值走暫存器，不佔 frame。
+4. ❌ stack 上有東西在「表達這個函式」 → ✅ 函式本身只在 `.text`；stack 上的是某一次呼叫的 frame → 為什麼：程式碼和它工作時用的資料分開放。
+5. ❌ 機器碼放在 `.rodata` → ✅ 機器碼在 `.text`，`.rodata` 放唯讀資料 → 為什麼：`.text` 的頁有執行權限，`.rodata` 沒有。
+6. ❌ frame 的大小像 meta，實際多大執行期才知道 → ✅ 單一 frame 的大小是編譯期常數，寫死在函式開頭的指令裡；執行期才知道的是疊了幾個 → 為什麼：放在 stack 上的東西大小都必須編譯期已知，rustc 才算得出來。
+7. ❌ frame 的邊界是 scope，或是每個函式一個 → ✅ 每一次函式呼叫一個 → 為什麼：`{}` 和迴圈都共用所在函式的 frame；遞迴時同一個函式同時有多個 frame。
+8. ❌ frame 的大小 = 所有區域變數的總和 → ✅ 那是主要來源，還有暫時值、padding、返回位址、保存的暫存器；最佳化後也可能更小 → 為什麼：rustc 算的是「這個函式同時最多需要多少 stack」。
+9. ❌ frame 是 page 裡的上下界 → ✅ frame 是 stack 區域裡的位址範圍，和 page 是不同層，邊界互不對齊 → 為什麼：frame 由 stack pointer 劃分，kernel 不知道；page 由 page table 劃分，程式不知道。
+10. ❌ 值的大小、機器碼大小、frame 大小之間有固定的大小關係 → ✅ 只有「frame ≥ 直接放在它裡面的值」 → 為什麼：值也可以放在 heap，那時和任何 frame 都無關。
+11. ❌ `&str` 的 16 byte 用滿了，沒有空間可以借給 `Option` → ✅ 借的是「不會出現的值」：指標欄位不可能是 0 → 為什麼：空位是「能表示的組合數」減「合法值的數量」，和有沒有多餘的 byte 無關。
+12. ❌ `bool` 是 2 bit → ✅ 邏輯上 1 bit、實際佔 1 byte，空出 254 個值 → 為什麼：需要 2 bit 的是 `Option<bool>` 的三種狀態，一個 byte 放得下。
+13. ❌ `Option` 有一個固定的大小 → ✅ `Option<T>` 的大小看 `T`：`T` 有空位就和 `T` 一樣大，沒有就加 tag 再補對齊 → 為什麼：`Option` 只是一個普通的 enum。
+14. ❌ `List` 沒有欄位，所以 `Command::List` 這個值是 0 byte → ✅ 變數的型別是 `Command`，一律 32 byte → 為什麼：同一個型別的值必須一樣大。
+15. ❌ `Vec` 在 stack 上的部分分別指向 heap 上每一個元素 → ✅ 一個指標指向一塊連續空間，元素一個挨一個 → 為什麼：`Vec` 靠「每個元素一樣大」用乘法算位置。
+16. ❌「rustc 4 byte 一組」 → ✅ 正式名稱是 alignment：型別的對齊取欄位中最大的，大小補到對齊的整數倍 → 為什麼：對齊是 8 的型別就不是 4 byte 一組了。
+17. ❌ `Option<Command>` 是 32，因為對齊有多餘空間可以用 → ✅ 分兩步：`Command` 的 tag 放在對齊補出來的 byte 裡，所以 `Command` 是 32；`Option` 再借 tag 沒用到的值代表 `None`，所以沒有變大 → 為什麼：`Option` 這一層沒有用到任何新的 byte，它和 `Command` 共用同一個 tag。
+18. ❌ 能借的只有指標（位址 0），`Command` 不是指標所以沒得借 → ✅ 任何欄位只要有不會出現的值都能借：`bool`、`char`、enum 的 tag、`NonZero*` → 為什麼：判斷標準是「有沒有永遠不會出現的 bit 組合」，和是不是指標無關。
+
+---
+
+## 7. Rc / Arc / Send / Sync / 'static
 
 ### Arc（Atomically Reference Counted）
 - 解決：多個 task/執行緒要共享同一份資料，編譯期無法決定誰最後結束 → 執行期計數
@@ -576,7 +924,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 7. Closure 與 move
+## 8. Closure 與 move
 
 - `|x| x + 1`：`|...|` 是參數列表，不是 or；`||` 代表無參數
 - 可捕獲外部變數（`fn` 不行）；編譯器自動選最溫和的捕獲：只讀 → `&`、修改 → `&mut`、消耗 → 取走所有權
@@ -588,7 +936,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 8. async / Future / Waker
+## 9. async / Future / Waker
 
 ### Future
 - `trait Future { type Output; fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Output>; }`
@@ -652,7 +1000,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 9. Tokio runtime 結構
+## 10. Tokio runtime 結構
 
 - `#[tokio::main]` 展開為 `Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {...})`
 - 三群執行緒：**main thread**（1 條，只 `block_on` 推動 main Future，不參與 work stealing）、**worker**（預設 = 邏輯 CPU 數，啟動時建好，各有本地佇列 + 全域佇列 + work stealing）、**blocking pool**（獨立，不從 worker 撥）
@@ -671,7 +1019,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 10. 作業系統層
+## 11. 作業系統層
 
 ### process 與 thread
 - process = **資源容器**（獨立記憶體空間、fd 表、權限），動態向 kernel 要資源，kernel 在請求時檢查限制（不是預先裝滿的盒子）
@@ -749,7 +1097,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 11. 其他概念
+## 12. 其他概念
 
 ### trait
 - 定義一組共同行為，`impl Trait for Type` 顯式實作；可有預設方法、關聯型別（`type Output`）、可為空（marker）
@@ -779,7 +1127,7 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 
 ---
 
-## 12. 誤解修正記錄（一路上被校正過的點）
+## 13. 誤解修正記錄（一路上被校正過的點）
 
 | 原本的理解 | 修正後 |
 |---|---|
@@ -814,4 +1162,4 @@ t12  main 結束             exit syscall → kernel 收回整個位址空間，
 | ulimit -n = kernel API 數 | = 同時開著的 fd（資源把手）數 |
 | 每次 syscall 佔 fd | syscall 是動作，fd 是資源編號 |
 
-copy / move / clone / borrow 那條線被校正的 17 點在第 4 節的陷阱清單，保留「為什麼」一欄，所以不併進這張兩欄表。process 記憶體區域與 kernel 那條線被校正的 10 點在第 5 節的陷阱清單，同樣不併進來。
+copy / move / clone / borrow 那條線被校正的 17 點在第 4 節的陷阱清單，保留「為什麼」一欄，所以不併進這張兩欄表。process 記憶體區域與 kernel 那條線被校正的 10 點在第 5 節的陷阱清單，同樣不併進來。型別大小、enum 與 stack frame 那條線被校正的 18 點在第 6 節的陷阱清單。
