@@ -1,3 +1,5 @@
+use std::fmt;
+
 fn main() {
     // main 建立 capacity 為 10 的玩家，依序撿下面四樣，印出每次的結果：
 
@@ -37,8 +39,16 @@ fn main() {
         println!(
             "pickup {} result is {}",
             item.name.to_str(),
-            p.pick_up(item)
+            match p.pick_up_2(item) {
+                Ok(_) => true.to_string(),
+                Err(v) => v.to_string(),
+            }
         );
+        // println!(
+        //     "pickup {} result is {}",
+        //     item.name.to_str(),
+        //     p.pick_up(item)
+        // );
     }
 
     println!("total weight is {}", p.total_weight());
@@ -82,6 +92,12 @@ impl Drop for Item {
     }
 }
 
+impl fmt::Display for Item {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Can't pickup Item: {}", self.name.to_str())
+    }
+}
+
 struct Player {
     name: String,
     hp: u32,
@@ -108,12 +124,22 @@ impl Player {
         w
     }
     // 放進去之後不超過 capacity 就放進背包並回傳 true，否則不放、回傳 false。
+    #[allow(dead_code)]
     fn pick_up(&mut self, item: Item) -> bool {
         if self.capacity - self.total_weight() < item.weight {
             return false;
         }
         self.bag.push(item);
         true
+    }
+    // q5加分
+    #[allow(dead_code)]
+    fn pick_up_2(&mut self, item: Item) -> Result<(), Item> {
+        if self.capacity - self.total_weight() < item.weight {
+            return Err(item);
+        }
+        self.bag.push(item);
+        Ok(())
     }
     // 回傳 value 最高的物品；背包是空的就回傳 None。
     fn most_valuable(&self) -> Option<&Item> {
