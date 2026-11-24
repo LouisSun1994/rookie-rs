@@ -10,6 +10,8 @@ fn main() {
         "add shield",
         "add shield many",
         "list",
+        "clear",
+        "list",
         "quit",
         "add ghost 1",
     ];
@@ -17,13 +19,24 @@ fn main() {
     let mut bag = Vec::new();
     for line in lines {
         println!("> {line}");
-        let cmd = Command::parse(line);
-        let rs = match cmd {
-            Some(cc) => Command::execute(cc, &mut bag),
-            None => true,
-        };
+        // let cmd = Command::parse(line);
+        // let rs = match cmd {
+        //     Some(cc) => Command::execute(cc, &mut bag),
+        //     None => {
+        //         println!("無法解析");
+        //         true
+        //     }
+        // };
 
-        if !rs {
+        // if !rs {
+        //     break;
+        // }
+
+        let Some(cmd) = Command::parse(line) else {
+            println!("無法解析");
+            continue;
+        };
+        if !Command::execute(cmd, &mut bag) {
             break;
         }
     }
@@ -34,6 +47,7 @@ enum Command {
     Remove(String),
     List,
     Quit,
+    Clear,
 }
 
 impl Command {
@@ -45,16 +59,14 @@ impl Command {
             ["remove", item] => Some(Command::Remove(String::from(*item))),
             ["list"] => Some(Command::List),
             ["quit"] => Some(Command::Quit),
-            _ => {
-                println!("無法解析");
-                None
-            }
+            ["clear"] => Some(Command::clear()),
+            _ => None,
         }
     }
     fn execute(cmd: Command, bag: &mut Vec<(String, u32)>) -> bool {
         let rs = match cmd {
             Command::Add(item, count) => {
-                println!("{item} x{count}");
+                // println!("{item} x{count}");
                 match bag.iter_mut().find(|f| f.0 == item) {
                     Some((_, quantity)) => *quantity += count,
                     None => bag.push((item, count)),
@@ -64,11 +76,11 @@ impl Command {
             Command::Remove(item) => {
                 match bag.iter().position(|f| f.0 == item) {
                     Some(idx) => {
+                        // println!("remove {item}");
                         bag.remove(idx);
                     }
-                    None => println!("No item {item}"),
+                    None => println!("找不到: {item}"),
                 }
-                println!("remove {item}");
                 true
             }
             Command::List => {
@@ -76,7 +88,14 @@ impl Command {
                 true
             }
             Command::Quit => false,
+            Command::Clear => {
+                bag.clear();
+                true
+            }
         };
         rs
+    }
+    fn clear() -> Command {
+        Command::Clear
     }
 }
