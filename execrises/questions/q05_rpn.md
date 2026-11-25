@@ -267,47 +267,168 @@ cargo q5 && echo $?
 process結束的signal就是回傳值?(猜測，但這跟我上面猜測反例。)
 ```
 
-**複盤**：實驗 C 沒看到數字，兩個猜想都沒有東西可以驗。實測是 `1`。
+**複盤**：實驗 C 沒看到數字，兩個猜想都沒有東西可以驗。實測是 `1`。這一節依後來的討論重寫過。
 
-猜想一，一半對：`Err` 那行確實走 stderr。但 `Ok(())` 什麼都不印，而且 stdout / stderr 和結束代碼是兩條不相干的管道：
+#### 一句話版本
 
-| 管道 | 是什麼 | 誰讀 |
+`main` 回傳的 `Err` 被 std 的 runtime 翻譯成數字 `1`，這個數字經過 kernel，一手一手傳給父行程，最後被 shell 抄進 `$?`。全程不經過任何 fd。
+
+#### 先看角色：誰在哪裡
+
+```
+你的 process（一個 process，一條 main thread）
+┌──────────────────────────────────────────────┐
+│ C runtime 的啟動碼      ← process 開始時最先跑  │
+│   └─ 呼叫 std 的 runtime（std::rt，Rust 寫的） │
+│         └─ 呼叫你的 main                      │
+│         ┌─ main return Err(e)                │
+│      ←──┘ runtime 印 Error、決定數字 1         │
+│   ←──── 把 1 交回 C runtime                   │
+│ C runtime 呼叫 exit(1) ── syscall ──┐         │
+└─────────────────────────────────────┼────────┘
+                                      ▼
+                           kernel（不是 process）
+                           記下 1，拆掉這個 process，
+                           叫醒睡在 wait 裡的父行程
+```
+
+| 角色 | 是什麼 | 在哪 | 比喻（員工離職） |
+|---|---|---|---|
+| 你的 `main` | 你寫的函式 | 你的 process，user mode | 員工，交出一份報告（`Result`） |
+| std runtime | 編進你 binary 的函式 | 同一個 process，user mode | 主管，看報告、喊一句結論、定一個代碼 |
+| C runtime | 連結進你 binary 的函式 | 同一個 process，user mode | 人資，拿代碼去辦離職手續 |
+| kernel | 作業系統本體 | 不屬於任何 process，kernel mode | 政府機關，登記「已離職，代碼 1」 |
+| cargo | 另一個 process | 你的 process 的父行程 | 派員工來的仲介，在機關門口等 |
+| shell | 另一個 process | cargo 的父行程 | 委託仲介的客戶 |
+
+前三個是**同一條 thread 依序跑三段不同人寫的函式**，和 `main` 呼叫 `eval`、`eval` 呼叫 `pop2` 一樣，只是函式呼叫。C runtime 呼叫 Rust 這一段時，雙方遵守的約定是 C 的 ABI。真正「別的 process」只有 cargo 和 shell。
+
+#### 數字怎麼傳：時間軸
+
+```
+shell ──開──► cargo ──開──► q05_rpn
+  ▲ wait        ▲ wait
+  └── 1 ────────┴── 1 ─────── exit(1)
+```
+
+```
+t    誰的程式碼在跑    mode     發生什麼
+t0   你的 main        user     return Err(StackUnderflow)。只是把值交給呼叫者，不知道什麼代碼
+t1   std runtime      user     它是呼叫 main 的人。看回傳值：
+                                Ok(())  → 代碼 0，什麼都不印
+                                Err(e)  → 往 fd 2 寫 "Error: {e:?}"，代碼 1
+t2   C runtime        user     收到 1，呼叫 exit(1)，thread 進 kernel
+t3   kernel           kernel   把 1 填進這個 process 的紀錄，拆掉它（關 fd、收回記憶體），
+                                查紀錄上的父行程是 cargo，把睡在 wait 裡的 cargo 叫醒
+t4   cargo            user     wait 回傳，帶著 1。cargo 自己也 exit(1)
+t5   kernel           kernel   同 t3：填 cargo 的紀錄，叫醒它的父行程 shell
+t6   shell            user     wait 回傳，帶著 1。shell 把 1 存進自己的變數 ?
+t7   shell            user     你打 echo $?，shell 把 $? 換成 1，印出來
+```
+
+三個重點：
+
+- **接力**。你的程式不認識 shell，shell 也看不到你程式裡的 `Err`。每一手只認識上下兩家，沒有一個中央管理者在「把結果送給 shell」。
+- **mode 只在 t3、t5 變成 kernel**。「結束一個 process」只有 kernel 能做，程式只能申請。
+- **等的人是睡著的**。cargo 呼叫 `wait` 之後 thread 就睡了，不佔 CPU，不是一直在問「好了沒」。是 kernel 在 t3 把它叫醒。
+
+誰設定的：`1` 是 std runtime 在 t1 決定的。不是你的 `main`（它只回傳一個 `Result`），也不是 kernel（它只保管和轉交）。
+
+#### kernel 靠什麼知道要叫醒誰
+
+kernel 裡每個 process 有一筆紀錄（kernel 的資料，不在任何 process 的記憶體裡）：
+
+```
+┌───────────────────────────┐
+│ pid: 5002  （q05_rpn）      │
+│ 父行程: 5001（cargo）       │ ← 開子行程的那一刻就填好
+│ 結束代碼: （還沒有）         │ ← exit(1) 時才填
+└───────────────────────────┘
+```
+
+靠的是「父子關係」這條線，不是 fd。
+
+| | 等 IO（note 02） | 等子行程結束（這題） |
 |---|---|---|
-| stdout / stderr | fd 1 / fd 2，兩條 byte 流 | 終端機、`>`、`\|` |
-| 結束代碼 | 一個整數。行程結束時記在 kernel 裡這個行程的紀錄上 | 父行程，用 `wait` 系列 syscall 來領 |
+| 等什麼 | 某個 fd 可以讀寫了 | 某個子行程結束了 |
+| 用哪個 syscall 等 | `epoll_wait` / `kevent` | `wait` 系列 |
+| kernel 靠什麼知道要叫誰 | fd 上掛的等待名單 | process 紀錄裡的「父行程」 |
+| 拿到什麼 | 「這個 fd 好了」 | 子行程的結束代碼 |
 
-猜想二，方向對（行程結束時交出去的東西）。修一個詞：不是 signal，是結束代碼（exit status）。signal 是另一套機制：kernel 送給行程的通知，例如 Ctrl-C 的 `SIGINT`。
+這也是 process 之間傳東西（IPC）最原始的一種，但路很窄：只能子 → 父、一輩子一次、內容是一個小整數（0–255）。要傳更多得用 pipe、檔案、socket。
 
-完整的鏈。t0–t2 都是你的行程的 main thread：
+#### 兩條管道：字和數字是分開的
 
-```
-t    誰的程式碼在跑               mode     發生什麼
-t0   你的 main                   user     return Err(StackUnderflow)。只是普通的函式回傳值，交給呼叫 main 的人
-t1   std 的 runtime (lang_start)  user     它才是呼叫你的 main 的人。對回傳值呼叫 Termination::report()：
-                                           Ok(())  → 回傳 0
-                                           Err(e)  → eprintln!("Error: {e:?}")，回傳 1
-t2   C runtime                   user     lang_start 把 1 當成 C 的 main 的回傳值交回去，C runtime 呼叫 exit(1)，發出 exit syscall
-t3   kernel                      kernel   拆掉這個行程（關 fd、收回記憶體），把 1 記在它的行程紀錄上，叫醒在等它的父行程
-t4   cargo（父行程）              user     把你的 binary 開成子行程之後就睡在 wait。醒來領到 1，自己也 exit(1)
-t5   kernel                      kernel   同 t3，這次的父行程是 shell
-t6   shell                       user     wait 領到 1，存進 $?
-t7   shell                       user     echo $? 印出 1
-```
+| | 內容 | 怎麼出去 | 誰收 |
+|---|---|---|---|
+| fd 1（stdout） | `3 4 + => 7` 那些行 | `write(1, …)` | 終端機、`>`、`\|` |
+| fd 2（stderr） | `Error: StackUnderflow` | `write(2, …)` | 終端機、`2>` |
+| 結束代碼 | 整數 `1` | `exit(1)` 的參數 | 父行程，用 `wait` 領 |
 
-誰設定的：`1` 是 std 的 `Termination` 實作在 t1 決定的。不是你的 `main`（它只回傳一個 `Result`），也不是 kernel（它只保管和轉交）。
+t1 做了兩件**獨立**的事：往 fd 2 寫一行字，然後帶著 1 結束。`2>/dev/null` 把字丟掉，`$?` 還是 1。
 
-證據，拿掉 `#[derive(Debug)]`：
+#### `$?` 是什麼
 
-```
-error[E0277]: `CalcError` doesn't implement `Debug`
- --> src/bin/q05_rpn.rs:3:14
-  |
-3 | fn main() -> Result<(), CalcError> {
-  |              ^^^^^^^^^^^^^^^^^^^^^ the trait `Debug` is not implemented for `CalcError`
-  = note: required for `Result<(), CalcError>` to implement `Termination`
+shell 自己的一個變數，存在 shell 這個 process 的記憶體裡。每次有子行程結束，shell 就用 `wait` 領到的數字覆蓋它一次。所以 `echo $?` 連打兩次，第二次一定是 0：那是第一個 `echo` 的結束代碼。
+
+`A && B`、`A ; B` 也是 shell 在判斷，讀的就是這個數字。
+
+#### `Debug` 和 `Termination`
+
+`main` 的回傳型別必須實作 `Termination`（終止）這個 trait，t1 的 runtime 就是呼叫它來拿代碼。這份 impl **已經存在**，是 std 寫的：
+
+```rust
+impl<T: Termination, E: Debug> Termination for Result<T, E> { … }
 ```
 
-`main` 的回傳型別必須實作 `Termination`。`Result<(), E>` 的那份實作要求 `E: Debug`，因為 t1 要用 `{:?}` 印它。
+念作：「任何 `Result<T, E>`，只要 `E` 有 `Debug`，就自動有 `Termination`」。`Debug` 是條件，因為 t1 要用 `{:?}` 印它。
+
+| 你做的事 | 結果 |
+|---|---|
+| `CalcError` 加 `#[derive(Debug)]` | 條件滿足，`main` 可以回傳 `Result<(), CalcError>` |
+| 拿掉 `Debug` | E0277：`required for Result<(), CalcError> to implement Termination` |
+
+你不能自己寫 `impl Termination for Result<(), CalcError>`：trait 和 `Result` 都是 std 的，兩個都不是你的。和 `impl i64`、`Drop for u32`、`Display for Result` 是同一條規則。
+
+這整套只對 `main` 生效。一般函式回傳 `Err` 就只是把值交給呼叫者。
+
+#### 誰能啟動一個執行檔
+
+shell 不是必經的一關。必經的只有：**某個已經在跑的 process 向 kernel 申請開子行程**。
+
+| 誰啟動 | 例子 |
+|---|---|
+| shell | 在終端機打 `./q05_rpn` |
+| 另一個程式 | cargo 啟動你的 binary；編輯器的 rust-analyzer 存檔時直接啟動 `cargo check` |
+| 你自己的程式 | `std::process::Command::new("…").status()`，這一行就是「開子行程 + wait」 |
+| 系統服務管理員 | macOS 的 launchd、Linux 的 systemd |
+
+不能的是「沒有人啟動」。每個 process 都有父行程，往上追到 pid 1 為止，它是 kernel 開機時自己建的：
+
+```
+q05_rpn ← cargo ← shell ← 終端機 app ← launchd（pid 1）← kernel
+```
+
+自己看父行程：
+
+```rust
+println!("pid {}，父行程 {}", std::process::id(), std::os::unix::process::parent_id());
+```
+
+```
+ps -o pid,ppid,comm -p <父行程 pid>
+```
+
+#### 陷阱清單
+
+1. ❌ `Ok` 反饋 stdout、`Err` 反饋 stderr → ✅ `Ok(())` 什麼都不印；`Err` 時往 stderr 寫的那行只是 runtime 順口喊的，結果是靠結束代碼傳的 → 為什麼：字和數字是兩條分開的管道。
+2. ❌ process 結束的 signal 就是回傳值 → ✅ 結束時交出去的是結束代碼（exit status）；signal 是 kernel 送給 process 的通知（例如 Ctrl-C） → 為什麼：兩套不同的機制。
+3. ❌ kernel、Rust、C 是三種方式（或三個 process） → ✅ Rust runtime 和 C runtime 是同一個 process 裡的兩段函式，kernel 不是 process → 為什麼：前者是同一條 thread 的函式呼叫，進 kernel 才是 syscall。
+4. ❌ kernel 調整 fd，cargo 因此收到結束 → ✅ kernel 把代碼填進 process 紀錄，照紀錄上的「父行程」叫醒 cargo → 為什麼：等子行程結束用的是 `wait`，不是盯 fd。kernel 關 fd 只是打掃。
+5. ❌ cargo 一直在 listen → ✅ cargo 的 thread 睡在 `wait` 裡，不佔 CPU → 為什麼：等待不是在做事，是被叫醒之前都不跑。
+6. ❌ 因為用了 `Debug`，所以沒有 impl `Termination` → ✅ impl 是 std 早就寫好的，`Debug` 是它的條件 → 為什麼：`impl<…, E: Debug> Termination for Result<T, E>`。
+7. ❌ 執行檔一定要透過 shell 啟動 → ✅ 任何 process 都能開子行程 → 為什麼：shell 只是「讓人用打字申請開子行程」的工具。
+8. ❌ `cargo q5` 時你的程式的父行程是 shell → ✅ 是 cargo；shell 的子行程是 cargo → 為什麼：誰開的誰就是父行程。
 
 ### 問題 4
 
