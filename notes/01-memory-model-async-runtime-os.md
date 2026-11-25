@@ -288,6 +288,67 @@ v [ptr | len 2 | cap 2]
 - 自己的型別：小而純的資料（座標、顏色、ID、狀態列舉）加 `Copy`，其他不加。
 - 不要問「move 好還是 copy 好」，那是型別決定的。要問的是「這個函式需不需要擁有它」。
 
+### 透過借用能做什麼：不能 move
+
+**核心規則**
+
+> 借來的東西，用完必須原封不動。透過 `&T` 或 `&mut T` 可以看、再借、copy、clone，不能 move。
+
+`let x = 某個東西;` 是 copy 還是 move，看**被拿出來的那一塊**的型別有沒有 `Copy`，不看外層的 struct。
+
+```rust
+struct Player {
+    name: String, // 沒有 Copy
+    hp: u32,      // 有 Copy
+}
+
+impl Player {
+    fn a(&self) {
+        let h = self.hp;           // ✅ 拿的是 u32，copy。Player 本身沒有 Copy 也沒關係
+        let r = &self.name;        // ✅ 再借
+        let c = self.name.clone(); // ✅ 另外做一份
+        let n = self.name;         // ❌ E0507: cannot move out of `self.name` which is behind a shared reference
+        let p = *self;             // ❌ E0507: cannot move out of `*self` which is behind a shared reference
+    }
+}
+```
+
+| 透過 `&self` 做的事 | 可以嗎 | 做完之後原本的 instance |
+|---|---|---|
+| 看（`match`、比較、印） | ✅ | 沒變 |
+| 再借：`&self.name` | ✅ | 沒變 |
+| copy：`self.hp` | ✅ | 沒變，多了一份 |
+| clone：`self.name.clone()` | ✅ | 沒變，多了一份 |
+| move：`self.name`、`*self` | ❌ E0507 | 會留下一個被掏空的位置 |
+
+**關鍵細節**
+
+- `*self` 是「借條指的那個位置」，不是「把東西拿過來」。寫 `*` 本身不搬任何東西。`self.name` 就是 rustc 自動補成的 `(*self).name`，所以 `&self` 的 fn 一直都在用 `*`。
+- 能不能釋放 instance 在簽名就決定了：`self` 有擁有權，`&self` / `&mut self` 沒有。body 裡怎麼寫都改變不了。
+- copy 和 move 在機器層是同一個動作（照抄值自己的 byte），差在抄完之後原本那份還准不准用。copy 之後原本那份照樣能用，所以不違反「原封不動」；move 之後原本那份失效，所以違反。
+- `&mut self` 可以改，一樣不能 move（E0507，這次訊息是 behind a mutable reference）。要拿走就得同時放一個回去：`std::mem::take(&mut self.name)` 把內容拿走，原位留下空字串。
+
+**`match self` 與 `match *self`**
+
+| | `match self` | `match *self` |
+|---|---|---|
+| 被 match 的東西的型別 | `&T`（借條） | `T`（借條指的位置） |
+| arm 綁出來的變數 | 自動變成 `&欄位` | 欄位本身，等於要拿出來 |
+| 欄位是 `Copy`（`usize`） | `&usize` | `usize`，複製一份 |
+| 欄位不是 `Copy`（`String`） | `&String` | ❌ E0507 |
+| arm 沒有綁變數（`Op::Add`、`E::Bad(_)`） | 沒差 | 沒差 |
+
+```rust
+match *self {
+    E::Bad(t) => …    // ❌ t 要成為 String，等於搬走
+    E::Many(n) => …   // ✅ n 是 usize，複製
+    E::Bad(_) => …    // ✅ 沒有綁變數，沒有東西被搬
+}
+```
+
+- `match` 只是去看那個位置。會不會 move 由 arm 綁了什麼決定，不是 `match` 後面那個 `*`。
+- `match *self` 是舊寫法。現在的習慣是 `match self`，綁出來的變數自動是 reference。
+
 ### 思維鏈：一個 `String` 走過 move、borrow、clone、drop
 
 ```rust
@@ -337,6 +398,10 @@ t6   main 結束                               釋放 Q                c 離開�
 15. ❌ move 等於 clone，或 move 傳的一定是位址 → ✅ move 只抄值自己的 byte，heap 內容不動；clone 才配置新的一塊 → 為什麼：1 GB 的 `String` move 只抄 24 byte。
 16. ❌ 一直 copy 會 stack overflow → ✅ stack frame 編譯期就固定，重複複製只是往同一格寫 → 為什麼：overflow 來自呼叫太深或單一區域變數太大。
 17. ❌ clone 一定是最吃資源的 → ✅ 看型別：`String` 深複製，`Rc` 只加計數 → 為什麼：`clone` 是作者寫的 method，不是固定動作。
+18. ❌ `match *self` 會把 instance 拿過來，fn 結束後釋放 → ✅ `*self` 只是借條指的位置，`match` 只是看；`&self` 的 fn 無論怎麼寫都不會釋放 instance → 為什麼：釋放是擁有者的事，有沒有擁有權在簽名（`self` vs `&self`）就決定了。
+19. ❌ `&self` 的 fn 裡不能用 `*self` 取值，只能操作位址 → ✅ `*self` 可以用，`self.field` 本來就是 `(*self).field`；不能做的只有 move → 為什麼：被禁止的是「搬走」這個動作，不是 `*` 這個符號。
+20. ❌ 透過借用不能 copy 也不能 move → ✅ copy 可以，只有 move 不行 → 為什麼：copy 之後原本那份原封不動，move 之後原本那份失效，擁有者回來會拿到壞掉的值。
+21. ❌ 能不能從借用裡拿出來，看這個 struct 有沒有實作 `Copy` → ✅ 看被拿出來的那一塊的型別：`self.hp`（`u32`）可以，`self.name`（`String`）不行，跟 `Player` 有沒有 `Copy` 無關 → 為什麼：欄位各有各的型別，`Copy` 是型別的性質。
 
 ---
 
