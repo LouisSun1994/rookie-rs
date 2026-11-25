@@ -13,7 +13,7 @@ Rust 動手練習。一題一個 binary：
 - [x] [q02：字串的三種簽名](questions/q02_strings.md) — `String` vs `&str`、move、`&` / `&mut`
 - [x] [q03：玩家背包](questions/q03_inventory.md) — `struct`、`impl`、`&self` / `&mut self` / `self`、`Vec`、`Drop`
 - [x] [q04：指令解析器](questions/q04_commands.md) — `enum`、`match`、`Option`
-- [ ] [q05：RPN 計算機](questions/q05_rpn.md) — `Result`、`?`、自訂 error、`checked_*`
+- [x] [q05：RPN 計算機](questions/q05_rpn.md) — `Result`、`?`、自訂 error、`checked_*`
 
 🦀 進階
 

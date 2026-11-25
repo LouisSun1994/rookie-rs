@@ -65,30 +65,12 @@ fn eval(expr: &str) -> Result<i64, CalcError> {
     let mut num_stack: Vec<i64> = Vec::new();
 
     for token in expr.split_whitespace() {
-        match token {
-            "+" | "-" | "*" | "/" => {
+        match Op::parse(token) {
+            Some(op) => {
                 let (addend, augend) = pop2(&mut num_stack)?;
-
-                match token {
-                    "+" => {
-                        num_stack.push(augend.checked_add(addend).ok_or(CalcError::Overflow)?);
-                    }
-                    "-" => {
-                        num_stack.push(augend.checked_sub(addend).ok_or(CalcError::Overflow)?);
-                    }
-                    "*" => {
-                        num_stack.push(augend.checked_mul(addend).ok_or(CalcError::Overflow)?);
-                    }
-                    "/" => {
-                        if addend == 0 {
-                            return Err(CalcError::DivideByZero);
-                        }
-                        num_stack.push(augend.checked_div(addend).ok_or(CalcError::Overflow)?);
-                    }
-                    _ => return Err(CalcError::BadToken(token.to_string())),
-                }
+                num_stack.push(Op::calc(&op, augend, addend)?)
             }
-            _ => {
+            None => {
                 if let Ok(iteger) = token.parse::<i64>() {
                     num_stack.push(iteger);
                 } else {
@@ -115,6 +97,38 @@ impl fmt::Display for CalcError {
             CalcError::DivideByZero => write!(f, "DivideByZero"),
             CalcError::Overflow => write!(f, "Overflow"),
             CalcError::TooManyOperands(n) => write!(f, "TooManyOperands({n})"),
+        }
+    }
+}
+
+enum Op {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl Op {
+    fn parse(token: &str) -> Option<Op> {
+        match token {
+            "+" => Some(Op::Add),
+            "-" => Some(Op::Sub),
+            "*" => Some(Op::Mul),
+            "/" => Some(Op::Div),
+            _ => None,
+        }
+    }
+    fn calc(&self, augend: i64, addend: i64) -> Result<i64, CalcError> {
+        match *self {
+            Op::Add => augend.checked_add(addend).ok_or(CalcError::Overflow),
+            Op::Sub => augend.checked_sub(addend).ok_or(CalcError::Overflow),
+            Op::Mul => augend.checked_mul(addend).ok_or(CalcError::Overflow),
+            Op::Div => {
+                if addend == 0 {
+                    return Err(CalcError::DivideByZero);
+                }
+                augend.checked_div(addend).ok_or(CalcError::Overflow)
+            }
         }
     }
 }
