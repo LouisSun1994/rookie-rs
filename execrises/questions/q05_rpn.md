@@ -473,45 +473,180 @@ ps -o pid,ppid,comm -p <父行程 pid>
 內層frame也都釋放了。
 ```
 
-**複盤**：方向對（自己擁有的資料才不受別人的生死影響），但卡在老地方：把 lifetime 當成 frame。
+**複盤**：方向對（自己擁有的資料才不受別人的生死影響），但把「誰消失」搞錯了。這一節依後來的討論重寫過。
 
-模型錯的地方：「`&str` 會綁在某一次 frame 內」。`token` 不指向 `eval` 的 frame。`split_whitespace()` 切出來的每個 `&str` 是 (ptr, len)，ptr 指進 **`expr` 那串字元**裡面。那串字元的擁有者是 `eval` 的呼叫者（這題是字串字面值，在 `.rodata`）。`eval` return 時消失的只有 (ptr, len) 這 16 bytes，被指的字元還在。
+#### 一句話版本
 
-所以 `&str` 版**編得過**（實測，12 行輸出相同）：
+error 會往上丟，要活得比輸入字串久。在 Rust，**要活得久只能靠擁有，不能靠借**，所以 error 裡放 `String`。
 
-```rust
-enum CalcError<'a> {
-    Empty,
-    BadToken(&'a str),
-    // 其餘不變
-}
+#### 三句話收完整條線
 
-fn eval<'a>(expr: &'a str) -> Result<i64, CalcError<'a>>
-// 省略寫法：fn eval(expr: &str) -> Result<i64, CalcError<'_>>
+1. 東西何時釋放，由**擁有者**決定，沒有例外。
+2. reference **不能**讓東西活久一點。
+3. 所以 rustc 在編譯期檢查每張借條，會活過東西的就不給編。lifetime 是它做這個檢查用的標註。
+
+#### 先看記憶體：`token` 指向哪裡
+
+`eval("2 x +")` 發現 `x` 不是數字的那一刻：
+
+```
+main 的 frame                    eval 的 frame
+┌─────────────────┐              ┌──────────────────────┐
+│ li: (ptr, 5) ───┼──┐           │ expr:  (ptr, 5) ──┐  │
+└─────────────────┘  │           │ token: (ptr, 1) ─┐│  │
+                     │           └──────────────────┼┼──┘
+                     ▼                              ││
+              那串字元（這題在 .rodata）               ││
+              ┌───┬───┬───┬───┬───┐                 ││
+              │ 2 │   │ x │   │ + │ ◄───────────────┘│ expr 指向開頭
+              └───┴───┴───┴───┴───┘                  │
+                        ▲                            │
+                        └────────────────────────────┘ token 指向中間的 x
 ```
 
-`'a` 的意思：「回傳的 `CalcError` 裡借的東西，和 `expr` 借的是同一份。`expr` 指的那串字元活多久，這個 error 最多就能用多久。」它不決定任何東西何時釋放，只是寫給 rustc 檢查用的。
+`token` **沒有指向 `eval` 的 frame**。它指進那串字元裡。`eval` return 時消失的只有 frame 裡的 (ptr, len)，字元不受影響。
 
-會失敗的是輸入字串的擁有者比 error 早消失：
+兩種 `BadToken` 放的東西：
+
+```
+BadToken(String)   ──► heap: [ x ]                   自己的一份，token.to_string() 抄出來的
+BadToken(&str)     ──► [ 2 │   │ x │   │ + ]         還是指著原本那串字元
+                                 ▲
+```
+
+#### lifetime 只問一個問題
+
+> error 還在被使用的時候，那串字元的**擁有者**還活著嗎？
+
+字元在 `.rodata` 還是 heap 不重要。傳進 `eval` 的都是 `&str`，`eval` 分不出來。重要的是擁有者活到哪。
+
+| 字元來源 | 擁有者 | 擁有者活到 | error 用到 | `&str` 版 |
+|---|---|---|---|---|
+| 字面值 `"2 x +"` | 沒有，在 `.rodata` | 程式結束 | 哪裡都行 | ✅ |
+| `main` 裡的 `String` | `main` 的變數 | `main` 結束 | `main` 裡面 | ✅ |
+| 迴圈裡每輪做的 `String`，當輪就印 | 那一輪的變數 | 那一輪結束 | 那一輪裡面 | ✅ |
+| 迴圈裡每輪做的 `String`，error 存到迴圈外 | 那一輪的變數 | 那一輪結束 | 迴圈之後 | ❌ E0597 |
+| 某個函式裡的 `String`，error 被 return 出去 | 那個函式的變數 | 那個函式結束 | 函式外面 | ❌ E0515 |
+
+字面值只是「永遠不會被釋放」的特例，所以永遠不會出事。
+
+#### 借進來沒事，帶出去才有事
+
+`eval` 執行期間，`expr` 一定有效：呼叫者要等 `eval` return 才會繼續跑，不可能中途把字串放掉。lifetime 管的是 **return 之後**：有沒有東西帶著那個位址離開。
 
 ```rust
-fn read_and_eval() -> Result<i64, CalcError<'static>> {
-    let line = String::from("2 x +"); // 字元的擁有者在這個 frame
-    eval(&line)
-    // error[E0515]: cannot return value referencing local variable `line`
+fn abc() {
+    let aaaa = String::from("1 x +");
+    eval(&aaaa);            // 回傳值沒人接，當場丟掉
+}                           // aaaa 在這裡釋放。兩個版本都 ✅
+```
+
+```rust
+fn abc() -> Result<i64, CalcError<'_>> {
+    let aaaa = String::from("1 x +");
+    eval(&aaaa)             // 把 error 帶出去
+}                           // aaaa 在這裡釋放，error 卻還指著它
+// error[E0515]: cannot return value referencing local variable `aaaa`
+//               returns a value referencing data owned by the current function
+```
+
+第二個的結局不是「heap 留著給外面用」，是**編不過，沒有執行檔**。
+
+同一個函式，`aaaa` 換成字面值就過了，因為字元沒有擁有者、不會被釋放：
+
+```rust
+fn abc() -> Result<i64, CalcError<'static>> {
+    let aaaa = "1 x +";     // &'static str，字元在 .rodata
+    eval(aaaa)              // ✅
 }
 ```
 
-你說的「frame 釋放」在這裡才成立，而且是**輸入字串擁有者**的 frame，不是 `eval` 的。
+#### 和 Go 最根本的差別
+
+| | Go | Rust |
+|---|---|---|
+| 誰決定一塊記憶體何時釋放 | GC：還有人指著它，就不放 | 擁有者：擁有者的 scope 結束，就放 |
+| 回傳指向區域變數的指標 | 可以。編譯器把它搬到 heap，GC 留著 | 不行。編譯期擋下 |
+| reference 的地位 | 能讓東西活著 | 只是借條，對壽命沒有發言權 |
+| 代價 | 執行期跑 GC | 編譯期過 borrow checker |
+
+「有人還在用它，所以它應該還在」在 Go 是對的。在 Rust，reference 沒有這個能力，所以 rustc 必須檢查借條有沒有活得比東西久。
+
+想讓資料活到函式外面，只能把**擁有權**帶出去：
+
+| 做法 | 意思 |
+|---|---|
+| error 裡放 `String` | error 自己擁有一份。這題的答案 |
+| 把 `String` 本身 return 出去 | 擁有權 move 給呼叫者 |
+| `Rc<String>` / `Arc<String>` | 多個擁有者共用，最後一個消失才釋放（q10） |
+
+#### `'a` 是什麼
+
+一個標籤，把「輸入的借用」和「輸出的借用」綁在一起，寫給 rustc 和呼叫者看。
+
+| `'a` 是 | `'a` 不是 |
+|---|---|
+| 簽名上的關係說明 | 某個 frame |
+| 給 rustc 檢查用的 | 決定什麼時候釋放 |
+| 只存在於編譯期，不產生任何機械碼 | 能讓 heap 留下來的機制 |
+
+每個 reference 本來就有 lifetime，常見情況 rustc 允許不寫，照固定規則補上（lifetime elision，壽命省略）：
+
+| 規則 | 內容 |
+|---|---|
+| 1 | 參數裡每個省略的 reference，各拿一個自己的 lifetime |
+| 2 | 參數的 lifetime 只有一個時，回傳型別裡省略的都用它 |
+| 3 | 有 `&self` / `&mut self` 時，回傳型別裡省略的用 `self` 的 |
+
+#### 兩個版本的簽名
 
 | | `BadToken(String)` | `BadToken(&'a str)` |
 |---|---|---|
-| error 裡放的 | 自己擁有的一份字元，在 heap | 指進輸入字串的 (ptr, len) |
-| 成本 | 出錯時配置一次 heap | 不配置 |
-| 型別 | `CalcError` | `CalcError<'a>`，所有提到它的簽名都要帶 lifetime |
-| error 能活多久 | 不受限：存起來、一路往上丟、送到別條 thread | 不能超過輸入字串 |
+| `CalcError` 的定義 | `enum CalcError` | `enum CalcError<'a>` |
+| `eval` 完整簽名 | `fn eval<'a>(expr: &'a str) -> Result<i64, CalcError>` | `fn eval<'a>(expr: &'a str) -> Result<i64, CalcError<'a>>` |
+| 平常省略成 | `fn eval(expr: &str) -> Result<i64, CalcError>` | `fn eval(expr: &str) -> Result<i64, CalcError<'_>>` |
+| `'a` 出現幾處 | 只有參數 | 參數和回傳，同一個 |
+| 回傳值借著 `expr` 嗎 | 沒有。return 之後和 `expr` 無關 | 有。error 不能活得比 `expr` 指的字串久 |
 
-題目選 `String` 的理由：error 通常會被一路往上丟，離輸入越來越遠。只在失敗那條路多配置一次，換來 error 不依賴任何人。
+- 型別裡有 reference，才需要帶 `<'a>`。`String` 是擁有的資料，所以 `String` 版的 `CalcError` 不能寫 `<'a>`（E0107）。
+- `'a` 要兩邊都寫才有東西可以綁。只寫回傳那邊（`expr: &str` → `CalcError<'a>`），rustc 不知道 error 借的是誰的（E0621，它會直接建議在 `expr` 補 `'a`）。
+
+#### 那 `&str` 版是不是比較好
+
+對這支程式成立：`main` 擁有輸入、`main` 當場印掉，編得過，也省一次配置。但不是通則。
+
+「不用一直做 `String`」：本來就沒有一直。`to_string()` 只在遇到壞 token 時跑一次，那一行就是 `return Err(…)`。
+
+簽名是 `eval` 對**所有呼叫者**的承諾。選 `&str` 版，等於規定每個呼叫者「error 用完之前，輸入字串不准放掉」：
+
+| 情境 | `String` 版 | `&str` 版 |
+|---|---|---|
+| 現在的 `main`：當場印掉 | ✅ | ✅ |
+| 逐行讀檔，error 收集起來最後一起印 | ✅ | ❌ |
+| `main` 回傳 `Err`，輸入是 `main` 裡的 `String` | ✅ | ❌ |
+| 把 error 送到另一條 thread（q11） | ✅ | ❌ |
+
+怎麼選：
+
+| | 借（`&'a str`） | 擁有（`String`） |
+|---|---|---|
+| 適合 | 成功路徑上、大量產生、馬上用完的東西 | error、要存起來、要傳到遠處的東西 |
+| 例 | `split_whitespace()` 切出來的 token、q09 的 tokenizer | error 型別 |
+| 換到什麼 | 零配置 | 不依賴任何人，簽名乾淨 |
+| 付出什麼 | 綁住呼叫者，`<'a>` 到處傳 | 偶爾一次配置 |
+
+#### 陷阱清單
+
+1. ❌ `&str` 綁在 `eval` 的 frame 上，`eval` return 就不能用 → ✅ 它指進輸入的那串字元，依賴的是**那串字元的擁有者** → 為什麼：frame 裡只有 (ptr, len)，字元不在 frame 裡。
+2. ❌ `&str` 能不能用，看來源是字面值還是 `String` → ✅ 看擁有者活得有沒有比借用的人久；`main` 裡的 `String` 一樣可以 → 為什麼：兩種傳進來都是 `&str`，字元放哪不重要。
+3. ❌ `expr` 在呼叫期間都有效，所以不需要 lifetime → ✅ 呼叫期間確實永遠有效；lifetime 管的是 return 之後有沒有東西帶著位址離開 → 為什麼：借進來沒事，帶出去才有事。
+4. ❌ 函式結束，frame 放掉，但 `String` 的 heap 還在 → ✅ 擁有者離開 scope，stack 上的 (ptr, len, cap) 和 heap 上的字元一起消失 → 為什麼：rustc 在 `}` 前插了釋放 heap 的程式碼。
+5. ❌ 還有人指著它，所以它會繼續存在 → ✅ 那是 Go。Rust 的 reference 不能延長任何東西的壽命 → 為什麼：沒有 GC，釋放時機只看擁有者。
+6. ❌ 寫了 lifetime，heap 就會留下來給外面的 frame 指 → ✅ lifetime 只做檢查。會出事的寫法結局是編不過 → 為什麼：lifetime 在執行期不存在。
+7. ❌ rustc 把 `&str`「轉成」`&'a str` → ✅ 每個 reference 本來就有 lifetime，只是允許不寫 → 為什麼：省略是語法上的方便，不是改寫。
+8. ❌ `fn eval<'a>(expr: &str) -> Result<i64, CalcError<'a>>` → ✅ `expr` 也要寫 `&'a str` → 為什麼：`'a` 的作用是把兩邊綁在一起，只寫一邊沒有東西可綁。
+9. ❌ `String` 版也寫 `CalcError<'a>` → ✅ 沒有 reference 的型別沒有 lifetime 參數 → 為什麼：`String` 是擁有的資料。
+10. ❌ `&str` 版省配置，所以是最好的寫法 → ✅ error 型別慣例用擁有的資料 → 為什麼：省到的是錯誤路徑上一次配置，付出的是限制所有呼叫者。
 
 ## 加分
 
