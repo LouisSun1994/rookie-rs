@@ -611,6 +611,101 @@ fn abc() -> Result<i64, CalcError<'static>> {
 - 型別裡有 reference，才需要帶 `<'a>`。`String` 是擁有的資料，所以 `String` 版的 `CalcError` 不能寫 `<'a>`（E0107）。
 - `'a` 要兩邊都寫才有東西可以綁。只寫回傳那邊（`expr: &str` → `CalcError<'a>`），rustc 不知道 error 借的是誰的（E0621，它會直接建議在 `expr` 補 `'a`）。
 
+#### 實際改成 `&'a str` 版：7 個地方
+
+以結案時的 `q05_rpn.rs` 為底。實測：13 行輸出和 `String` 版逐行相同，clippy 沒有 warning。repo 裡的檔案沒有改，這裡只是對照。
+
+```rust
+#[derive(Debug)]
+enum CalcError<'a> {                          // ① 加 <'a>
+    Empty,
+    BadToken(&'a str),                        // ② String → &'a str
+    StackUnderflow,
+    DivideByZero,
+    Overflow,
+    TooManyOperands(usize),
+}
+
+fn pop2(stack: &mut Vec<i64>) -> Result<(i64, i64), CalcError<'static>> {   // ③
+    // body 不變
+}
+
+fn eval<'a>(expr: &'a str) -> Result<i64, CalcError<'a>> {                  // ④
+    let mut num_stack: Vec<i64> = Vec::new();
+
+    for token in expr.split_whitespace() {
+        match Op::parse(token) {
+            Some(op) => {
+                let (addend, augend) = pop2(&mut num_stack)?;
+                num_stack.push(Op::calc(&op, augend, addend)?)
+            }
+            None => {
+                if let Ok(iteger) = token.parse::<i64>() {
+                    num_stack.push(iteger);
+                } else {
+                    return Err(CalcError::BadToken(token));                 // ⑤ 拿掉 .to_string()
+                }
+            }
+        }
+    }
+    // 後面不變
+}
+
+impl fmt::Display for CalcError<'_> {                                       // ⑥
+    // body 不變
+}
+
+impl Op {
+    fn calc(&self, augend: i64, addend: i64) -> Result<i64, CalcError<'static>> {   // ⑦
+        // body 不變
+    }
+}
+```
+
+`main` 不用改，因為 `list` 裡都是字面值。
+
+| # | 改動 | 意思 |
+|---|---|---|
+| ① ② | `CalcError<'a>`、`BadToken(&'a str)` | 這個型別裡借了一個活 `'a` 那麼久的東西 |
+| ④ | `eval<'a>(expr: &'a str) -> … CalcError<'a>` | error 借的就是 `expr` 那串字元 |
+| ⑤ | `BadToken(token)` | 直接放借條，不配置 heap。省掉的就是這一次 |
+| ⑥ | `CalcError<'_>` | 不管哪個 lifetime 的 `CalcError` 都能印。`'_` 是不取名字的寫法 |
+| ③ ⑦ | `CalcError<'static>` | 回的 error 不依賴任何人，想留多久都行 |
+
+**③ ⑦ 為什麼是 `'static`，不能寫 `'_`**
+
+`pop2` 和 `calc` 只會回 `StackUnderflow`、`DivideByZero`、`Overflow`，這些 variant 沒有借任何東西。但寫成 `CalcError<'_>` 的話，rustc 會套省略規則 2，把它綁到唯一的那個參數上：
+
+```rust
+fn pop2(stack: &mut Vec<i64>) -> Result<(i64, i64), CalcError<'_>>
+// rustc 補成：error 借著 stack
+```
+
+於是 rustc 認為 `pop2` 回的 error 借著 `num_stack`，而 `num_stack` 是 `eval` 的區域變數。`?` 要把這個 error return 出 `eval`，就撞到「不能回傳指著區域變數的借條」。實測：
+
+```
+error[E0515]: cannot return value referencing local variable `num_stack`
+   |
+70 |     let (addend, augend) = pop2(&mut num_stack)?;
+   |                            ^^^^^--------------^^
+   |                            |    `num_stack` is borrowed here
+   |                            returns a value referencing data owned by the current function
+```
+
+`calc(&self)` 寫 `'_` 也一樣（規則 3，綁到 `&self`），錯誤變成 `referencing local variable op`。
+
+> rustc **只看簽名，不看 body**。body 裡沒借，簽名說有借，它就當作有借。
+
+**這個版本讓你看到的代價**
+
+| | `String` 版 | `&'a str` 版 |
+|---|---|---|
+| 要改的地方 | | 7 處。其中 ③ ④ ⑥ ⑦ 只是因為型別多了 `<'a>` 被迫跟著改 |
+| `pop2`、`calc` | 完全不用想 lifetime | 明明沒借東西，還是得寫對 `'static`，寫錯會得到看起來不相干的錯誤 |
+| 省到的 | | 遇到壞 token 時一次 heap 配置 |
+
+這就是「`<'a>` 會傳染」的實際樣子：一個 variant 想借，整個 `CalcError` 和所有回傳它的函式都要跟著處理。
+
 #### 那 `&str` 版是不是比較好
 
 對這支程式成立：`main` 擁有輸入、`main` 當場印掉，編得過，也省一次配置。但不是通則。
@@ -647,6 +742,7 @@ fn abc() -> Result<i64, CalcError<'static>> {
 8. ❌ `fn eval<'a>(expr: &str) -> Result<i64, CalcError<'a>>` → ✅ `expr` 也要寫 `&'a str` → 為什麼：`'a` 的作用是把兩邊綁在一起，只寫一邊沒有東西可綁。
 9. ❌ `String` 版也寫 `CalcError<'a>` → ✅ 沒有 reference 的型別沒有 lifetime 參數 → 為什麼：`String` 是擁有的資料。
 10. ❌ `&str` 版省配置，所以是最好的寫法 → ✅ error 型別慣例用擁有的資料 → 為什麼：省到的是錯誤路徑上一次配置，付出的是限制所有呼叫者。
+11. ❌ `pop2` 沒借東西，回傳型別寫 `CalcError<'_>` 就好 → ✅ 要寫 `CalcError<'static>` → 為什麼：`'_` 會照省略規則綁到參數 `stack`，rustc 只看簽名，就當作 error 借著 `num_stack`。
 
 ## 加分
 
